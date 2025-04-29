@@ -40,7 +40,8 @@ def db_connection():
              user=os.getenv("CLICKHOUSE_USER"),
              password=os.getenv("CLICKHOUSE_PASSWORD")
         )
-        temp_client.execute_query(f"CREATE DATABASE IF NOT EXISTS {TEST_DATABASE_NAME}")
+        # Use execute_command for CREATE DATABASE
+        temp_client.execute_command(f"CREATE DATABASE IF NOT EXISTS {TEST_DATABASE_NAME}")
         temp_client.close()
     except Exception as e:
         pytest.fail(f"Failed to connect to ClickHouse or create test database: {e}")
@@ -56,8 +57,8 @@ def db_connection():
             user=os.getenv("CLICKHOUSE_USER"),
             password=os.getenv("CLICKHOUSE_PASSWORD")
         )
-        # Ensure connection is working
-        db.execute_query("SELECT 1")
+        # Ensure connection is working using execute_command
+        db.execute_command("SELECT 1")
         print(f"\nConnected to ClickHouse database: {TEST_DATABASE_NAME}")
 
         yield db # Provide the database connection to the tests
@@ -72,7 +73,8 @@ def db_connection():
             tables_to_drop = [TEST_INSTRUMENT_TABLE, TEST_STOCK_TABLE, TEST_OPTION_TABLE, TEST_OHLCV_TABLE]
             for table in tables_to_drop:
                 try:
-                    db.execute_query(f"DROP TABLE IF EXISTS `{table}`")
+                    # Use execute_command for DROP TABLE
+                    db.execute_command(f"DROP TABLE IF EXISTS `{table}`")
                     print(f"Dropped table: `{table}`")
                 except Exception as e:
                     print(f"Error dropping table `{table}`: {e}")
@@ -87,7 +89,8 @@ def db_connection():
                      user=os.getenv("CLICKHOUSE_USER"),
                      password=os.getenv("CLICKHOUSE_PASSWORD")
                  )
-                 temp_client_drop.execute_query(f"DROP DATABASE IF EXISTS {TEST_DATABASE_NAME}")
+                 # Use execute_command for DROP DATABASE
+                 temp_client_drop.execute_command(f"DROP DATABASE IF EXISTS {TEST_DATABASE_NAME}")
                  print(f"Dropped test database: {TEST_DATABASE_NAME}")
                  temp_client_drop.close()
             except Exception as e:
@@ -109,8 +112,8 @@ def test_create_instrument_tables(db_connection: DataBase):
         order_by=['symbol'],
         primary_key=['symbol']
     )
-    # Verify table exists (optional, create_table raises on failure)
-    assert db.execute_query(f"EXISTS `{TEST_INSTRUMENT_TABLE}`").iloc[0, 0] == 1
+    # Verify table exists using execute_command
+    assert db.execute_command(f"EXISTS `{TEST_INSTRUMENT_TABLE}`") == 1
 
     # Test creating Stock table (inherits from Instrument)
     db.create_table(
@@ -120,7 +123,8 @@ def test_create_instrument_tables(db_connection: DataBase):
         order_by=['symbol'],
         primary_key=['symbol']
     )
-    assert db.execute_query(f"EXISTS `{TEST_STOCK_TABLE}`").iloc[0, 0] == 1
+    # Verify table exists using execute_command
+    assert db.execute_command(f"EXISTS `{TEST_STOCK_TABLE}`") == 1
 
 
     # Test creating Option table (inherits from Instrument, adds fields)
@@ -131,7 +135,8 @@ def test_create_instrument_tables(db_connection: DataBase):
         order_by=['symbol', 'expiration_date', 'strike_price', 'option_type'], # More specific order for options
         primary_key=['symbol', 'expiration_date', 'strike_price', 'option_type']
     )
-    assert db.execute_query(f"EXISTS `{TEST_OPTION_TABLE}`").iloc[0, 0] == 1
+    # Verify table exists using execute_command
+    assert db.execute_command(f"EXISTS `{TEST_OPTION_TABLE}`") == 1
 
 
 def test_create_ohlcv_table(db_connection: DataBase):
@@ -145,8 +150,8 @@ def test_create_ohlcv_table(db_connection: DataBase):
         order_by=['instrument_symbol', 'timestamp'],
         primary_key=['instrument_symbol', 'timestamp']
     )
-    # Verify table exists
-    assert db.execute_query(f"EXISTS `{TEST_OHLCV_TABLE}`").iloc[0, 0] == 1
+    # Verify table exists using execute_command
+    assert db.execute_command(f"EXISTS `{TEST_OHLCV_TABLE}`") == 1
 
 # Example of how to run these tests:
 # 1. Ensure ClickHouse is running and accessible via the environment variables.
