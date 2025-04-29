@@ -36,32 +36,36 @@ TABLE_CONFIGS = [
     {
         "model": Instrument,
         "table_name": "instruments",
-        "order_by": ["id"], # Assuming 'id' is the primary identifier for instruments
+        # Using 'symbol' as the primary identifier for base instruments (like stocks)
+        "order_by": ["symbol"],
         "engine": "MergeTree()"
     },
     {
         "model": Stock,
         "table_name": "stocks",
-        "order_by": ["id"], # Assuming 'id' is the primary identifier for stocks
+        # Using 'symbol' as the primary identifier for stocks
+        "order_by": ["symbol"],
         "engine": "MergeTree()"
     },
     {
         "model": Option,
         "table_name": "options",
-        "order_by": ["id"], # Assuming 'id' is the primary identifier for options
+        # Using 'contract_symbol' as the primary identifier for option contracts
+        "order_by": ["contract_symbol"],
         "engine": "MergeTree()"
     },
     {
         "model": OHLCV,
         "table_name": "ohlcv",
-        "order_by": ["instrument_id", "timestamp"], # OHLCV data is ordered by instrument and time
+        # Assuming instrument_id in OHLCV refers to the stock symbol
+        "order_by": ["instrument_id", "timestamp"], # OHLCV data is ordered by instrument (stock symbol) and time
         "engine": "MergeTree()"
     },
     {
         "model": OptionChain,
         "table_name": "option_chains",
-        # FIX: Changed 'collection_timestamp' to 'timestamp' to match the dataclass field name
-        "order_by": ["instrument_id", "timestamp"], # Option chains ordered by instrument and collection time
+        # Using 'contract_symbol' and 'timestamp' as the primary key for option chain snapshots
+        "order_by": ["contract_symbol", "timestamp"], # Option chains ordered by option contract symbol and collection time
         "engine": "MergeTree()"
     },
 ]

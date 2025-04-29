@@ -8,19 +8,22 @@ from typing import Optional
 class OptionChain:
     """Dataclass for raw Option Chain snapshot data."""
     # Primary Key / Identifying fields for this snapshot record
-    # instrument_id links to the Option instrument in the instruments table
-    instrument_id: str
+    # contract_symbol links to the Option instrument in the options table
+    # Changed from instrument_symbol to contract_symbol
+    contract_symbol: str
     # timestamp is when this specific snapshot was collected
     timestamp: datetime
 
-    # Add the underlying symbol
-    underlying_symbol: str
+    # Removed underlying_symbol as it can be derived from the Option contract linked by contract_symbol
+    # underlying_symbol: str # Removed
 
     # Fields directly from yfinance option chain DataFrame
-    contractSymbol: str
+    # contractSymbol is redundant with contract_symbol field above, assuming contract_symbol is the unique identifier
+    # contractSymbol: str # Removed, assuming contract_symbol is used instead
+
     # lastTradeDate can be NaN/NaT, so it's Optional
     lastTradeDate: Optional[datetime]
-    strike: float
+    strike: float # Keeping strike here as it's part of the snapshot data
     # Numeric fields can be NaN if data is missing, so they are Optional
     lastPrice: Optional[float]
     bid: Optional[float]

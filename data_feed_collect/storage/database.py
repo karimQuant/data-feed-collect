@@ -109,7 +109,7 @@ class DataBase:
         self.port = port or int(os.environ.get("CLICKHOUSE_PORT", 8123))
         self.database = database or os.environ.get("CLICKHOUSE_DATABASE", "default")
         self.user = user or os.environ.get("CLICKHOUSE_USER", "default")
-        self.password = password or os.environ.get("CLICKHOUSE_PASSWORD", "")
+        self.password = os.environ.get("CLICKHOUSE_PASSWORD", "") # Use get with default
 
         self.client: Optional[clickhouse_connect.ClickHouseClient] = None
         self._connect()

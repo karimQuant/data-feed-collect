@@ -20,7 +20,9 @@ from data_feed_collect.utils.logging_config import setup_logging
 
 
 # Assume table names based on test file summary and new requirement
-INSTRUMENTS_TABLE_NAME = "instruments" # Assuming a general instruments table
+INSTRUMENTS_TABLE_NAME = "instruments" # Assuming a general instruments table (for stocks)
+STOCKS_TABLE_NAME = "stocks" # Table for stock-specific data (might be redundant with instruments table depending on schema)
+OPTIONS_TABLE_NAME = "options" # Table for option contract definitions
 # OHLCV_TABLE_NAME = "ohlcv" # Remove OHLCV table name
 OPTION_CHAINS_TABLE_NAME = "option_chains" # New table name for raw option chain data
 
@@ -30,7 +32,7 @@ OPTION_CHAINS_TABLE_NAME = "option_chains" # New table name for raw option chain
 class YahooFinanceOptionsChainCollector:
     """
     Collects options chain data for a list of stock tickers from Yahoo Finance.
-    Saves option instruments and raw option chain snapshot data to the database.
+    Saves stock instruments, option instruments, and raw option chain snapshot data to the database.
     """
 
     def __init__(self):
@@ -41,52 +43,55 @@ class YahooFinanceOptionsChainCollector:
         # No specific initialization needed for yfinance itself
         pass
 
-    @staticmethod
-    def generate_option_instrument_id(underlying_ticker: str, expiration_date: date, strike: float, contract_type: str) -> str:
-        """Generates a unique ID for an option instrument."""
-        # Format: UNDERLYING_YYYYMMDD_TYPE_STRIKE
-        # Ensure strike is formatted consistently, e.g., remove trailing .0 if integer
-        strike_str = f"{strike:.2f}".rstrip('0').rstrip('.') if isinstance(strike, (int, float)) else str(strike)
-        return f"{underlying_ticker.upper()}_{expiration_date.strftime('%Y%m%d')}_{contract_type.upper()[0]}_{strike_str}"
+    # Removed generate_option_instrument_id as we are using contract_symbol
 
     @staticmethod
-    def map_option_snapshot_to_instrument(
-        instrument_id: str,
-        underlying_ticker: str,
-        expiration_date: date,
-        snapshot_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Maps a single option contract snapshot to an Instrument-like dictionary."""
-        # Assuming Instrument table has columns like:
-        # instrument_id (PK), symbol (e.g., option symbol like AAPL250117C00150000),
-        # instrument_type ('option'), underlying_symbol, strike, expiration_date, contract_type
+    def map_stock_instrument(ticker_symbol: str, ticker_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Maps ticker info to an Instrument-like dictionary for a stock."""
+        # Assuming Instrument table has columns like: symbol, currency, exchange, name
         return {
-            "instrument_id": instrument_id,
-            "symbol": snapshot_data.get('contractSymbol'), # yfinance contract symbol
-            "instrument_type": "option",
-            "underlying_symbol": underlying_ticker.upper(),
-            "strike": snapshot_data.get('strike'),
-            "expiration_date": expiration_date,
-            "contract_type": snapshot_data.get('contractType'), # 'call' or 'put'
-            # Add other relevant fields from snapshot if needed, e.g., currency
+            "symbol": ticker_symbol.upper(),
+            "currency": ticker_info.get('currency'),
+            "exchange": ticker_info.get('exchange'),
+            "name": ticker_info.get('longName') or ticker_info.get('shortName'),
+            # Add other relevant fields from ticker_info if needed and present in Instrument model
         }
 
     @staticmethod
+    def map_option_instrument(underlying_ticker: str, expiration_date: date, snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Maps a single option contract snapshot to an Option-like dictionary."""
+        # Assuming Option table has columns like:
+        # contract_symbol (PK), symbol (underlying ticker FK), expiration_date, option_type, strike_price, currency, exchange, name
+        return {
+            "contract_symbol": snapshot_data.get('contractSymbol'), # Use yfinance contract symbol as PK
+            "symbol": underlying_ticker.upper(), # Underlying ticker symbol (FK to instruments/stocks table)
+            "expiration_date": expiration_date,
+            "option_type": snapshot_data.get('contractType'), # 'Call' or 'Put'
+            "strike_price": snapshot_data.get('strike'),
+            "currency": snapshot_data.get('currency'), # Currency of the option
+            "exchange": snapshot_data.get('exchange'), # Exchange of the option
+            "name": snapshot_data.get('longName') or snapshot_data.get('shortName'), # Name of the option (often not available directly)
+            # Add other relevant fields from snapshot if needed
+        }
+
+
+    @staticmethod
     def map_option_snapshot_to_option_chain(
-        instrument_id: str,
         snapshot_data: Dict[str, Any],
         collection_timestamp: datetime,
-        underlying_ticker: str, # Uncommented and added to signature
+        # underlying_ticker: str, # Removed, can be derived via contract_symbol -> Option -> Stock
         # expiration_date: date # Not directly used in mapping to OptionChain fields
     ) -> Dict[str, Any]:
         """Maps a single option contract snapshot to an OptionChain dictionary."""
         # Map directly from the pandas row dictionary to the OptionChain dataclass fields
         # Handle potential NaN values by letting pandas convert them to None
         mapped_data = {
-            "instrument_id": instrument_id,
+            "contract_symbol": snapshot_data.get('contractSymbol'), # Link to the Option contract
             "timestamp": collection_timestamp,
-            "underlying_symbol": underlying_ticker.upper(), # Add underlying_symbol here
-            "contractSymbol": snapshot_data.get('contractSymbol'),
+            # Removed underlying_symbol as it's redundant with contract_symbol link
+            # "underlying_symbol": underlying_ticker.upper(), # Removed
+            # Removed contractSymbol as it's redundant with contract_symbol field above
+            # "contractSymbol": snapshot_data.get('contractSymbol'), # Removed
             # yfinance lastTradeDate can be a timestamp, convert to datetime if needed
             # Assuming it's already a datetime or convertible by pandas/clickhouse-connect
             "lastTradeDate": snapshot_data.get('lastTradeDate'),
@@ -115,7 +120,7 @@ class YahooFinanceOptionsChainCollector:
         return mapped_data
 
 
-    def _collect_single_ticker(self, ticker_symbol: str, collection_timestamp: datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _collect_single_ticker(self, ticker_symbol: str, collection_timestamp: datetime) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Collects options chain data for a single ticker.
         This method is intended to be run in a separate thread.
@@ -125,30 +130,40 @@ class YahooFinanceOptionsChainCollector:
             collection_timestamp: The timestamp for this collection run.
 
         Returns:
-            A tuple containing two lists:
-            - List of dictionaries for option instruments.
+            A tuple containing three lists:
+            - Dictionary for the stock instrument (or None if failed).
+            - List of dictionaries for option contracts.
             - List of dictionaries for raw option chain snapshots.
         """
-        option_instruments_data: List[Dict[str, Any]] = []
-        option_chains_data: List[Dict[str, Any]] = [] # Use list for raw option chain data
+        stock_instrument_data: Optional[Dict[str, Any]] = None
+        option_contracts_data: List[Dict[str, Any]] = [] # List for option contract definitions
+        option_chains_data: List[Dict[str, Any]] = [] # List for raw option chain snapshot data
 
-        self.logger.info(f"Collecting options chain for ticker: {ticker_symbol}")
+        self.logger.info(f"Collecting data for ticker: {ticker_symbol}")
 
         try:
             # Use the centralized rate limiter before making the request
-            # Call try_acquire directly. Since the limiter is configured with
-            # max_delay and raise_when_fail=False, it will wait if needed.
             limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
             ticker = yf.Ticker(ticker_symbol)
 
+            # Get stock info for the Instrument table
+            limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
+            ticker_info = ticker.info
+            if ticker_info:
+                 stock_instrument_data = self.map_stock_instrument(ticker_symbol, ticker_info)
+                 self.logger.debug(f"  Collected stock info for {ticker_symbol}")
+            else:
+                 self.logger.warning(f"  Could not fetch stock info for {ticker_symbol}. Skipping instrument creation.")
+
+
             # Get available expiration dates
-            # Apply rate limit again for the next API call
             limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
             expiration_dates = ticker.options
 
             if not expiration_dates:
                 self.logger.info(f"No options found for {ticker_symbol}.")
-                return [], [] # Return empty lists
+                # Return collected stock data, if any, and empty lists for options
+                return stock_instrument_data, [], []
 
             # Collect data for each expiration date
             for date_str in expiration_dates:
@@ -178,32 +193,20 @@ class YahooFinanceOptionsChainCollector:
                     # Process each option contract in the chain
                     for index, row in combined_df.iterrows():
                         try:
-                            # Generate unique instrument ID using the static method
-                            instrument_id = self.generate_option_instrument_id(
-                                underlying_ticker=ticker_symbol,
-                                expiration_date=expiration_date,
-                                strike=row['strike'],
-                                contract_type=row['contractType']
-                            )
-
-                            # Map data for Instrument table using the static method
-                            # For simplicity, we'll add it every time and rely on DB upsert
-                            # to handle duplicates based on instrument_id.
-                            option_instrument_data = self.map_option_snapshot_to_instrument(
-                                instrument_id=instrument_id,
+                            # Map data for Option table (contract definition)
+                            # Rely on DB upsert to handle duplicates based on contract_symbol.
+                            option_contract_data = self.map_option_instrument(
                                 underlying_ticker=ticker_symbol,
                                 expiration_date=expiration_date,
                                 snapshot_data=row.to_dict() # Pass row as dict
                             )
-                            option_instruments_data.append(option_instrument_data)
+                            option_contracts_data.append(option_contract_data)
 
-                            # Map data for OptionChain table (snapshot) using the static method
+                            # Map data for OptionChain table (snapshot)
                             option_chain_snapshot_data = self.map_option_snapshot_to_option_chain(
-                                instrument_id=instrument_id,
                                 snapshot_data=row.to_dict(), # Pass row as dict
                                 collection_timestamp=collection_timestamp,
-                                underlying_ticker=ticker_symbol, # Pass the underlying ticker
-                                # expiration_date=expiration_date # Not needed by mapping function
+                                # underlying_ticker=ticker_symbol, # Removed
                             )
                             option_chains_data.append(option_chain_snapshot_data)
 
@@ -219,10 +222,10 @@ class YahooFinanceOptionsChainCollector:
         except Exception as e:
             self.logger.error(f"An error occurred during Yahoo Options chain collection for {ticker_symbol}: {e}")
             # Return whatever data was collected so far, or empty lists if error was early
-            return option_instruments_data, option_chains_data # Return option_chains_data
+            return stock_instrument_data, option_contracts_data, option_chains_data
 
         self.logger.info(f"Finished collecting data for {ticker_symbol}.")
-        return option_instruments_data, option_chains_data # Return option_chains_data
+        return stock_instrument_data, option_contracts_data, option_chains_data
 
 
     def collect(self, config: Dict[str, Any], db: Any) -> None: # Use Any for db type hint to avoid circular dependency if DataBase not imported
@@ -247,14 +250,15 @@ class YahooFinanceOptionsChainCollector:
                 # Assuming a table named 'instruments' with 'instrument_type' column
                 # and 'symbol' column for the ticker.
                 # Need to ensure the DataBase class can execute queries and return DataFrame
-                query = f"SELECT symbol FROM {INSTRUMENTS_TABLE_NAME} WHERE instrument_type = 'stock'"
+                # Assuming 'instruments' table stores stocks and uses 'symbol' as PK
+                query = f"SELECT symbol FROM {INSTRUMENTS_TABLE_NAME}" # Assuming instruments table only contains stocks or symbol is unique across types
                 # Assuming execute_query returns a pandas DataFrame
                 stock_df = db.execute_query(query)
                 if not stock_df.empty:
                     tickers_to_collect = stock_df['symbol'].tolist()
-                    self.logger.info(f"Found {len(tickers_to_collect)} stock tickers in DB.")
+                    self.logger.info(f"Found {len(tickers_to_collect)} tickers in DB.")
                 else:
-                    self.logger.warning("No stock tickers found in the database.")
+                    self.logger.warning(f"No tickers found in the '{INSTRUMENTS_TABLE_NAME}' database table.")
 
             except Exception as e:
                 self.logger.error(f"Failed to fetch tickers from database: {e}")
@@ -277,31 +281,36 @@ class YahooFinanceOptionsChainCollector:
              self.logger.warning("No tickers available for options chain collection.")
              return
 
-        all_option_instruments_data: List[Dict[str, Any]] = []
-        all_option_chains_data: List[Dict[str, Any]] = [] # Use list for aggregated raw option chain data
+        # Lists to aggregate data from parallel collection
+        all_stock_instruments_data: List[Dict[str, Any]] = []
+        all_option_contracts_data: List[Dict[str, Any]] = []
+        all_option_chains_data: List[Dict[str, Any]] = []
         collection_timestamp = datetime.utcnow() # Timestamp for this collection run
 
-        # Ensure Instrument and OptionChain tables exist (optional, but good practice)
-        # This requires access to the model dataclasses and DataBase.create_table
+        # Ensure necessary tables exist
         try:
-            # Need to import Option and OptionChain dataclasses
-            from data_feed_collect.models import Option, OptionChain
-            # Assuming 'instrument_id' is the ORDER BY key for the instruments table
-            db.create_table(Option, INSTRUMENTS_TABLE_NAME, order_by=['instrument_id'], if_not_exists=True)
-            # Assuming 'instrument_id' and 'timestamp' are the ORDER BY key for the option_chains table
-            # Using ReplacingMergeTree to handle potential duplicate snapshots at the exact same timestamp
+            # Need to import Stock, Option, and OptionChain dataclasses
+            from data_feed_collect.models import Stock, Option, OptionChain
+            # Create/ensure instruments table (for stocks)
+            db.create_table(Instrument, INSTRUMENTS_TABLE_NAME, order_by=['symbol'], if_not_exists=True)
+            # Create/ensure stocks table (if needed, might be redundant with instruments)
+            # db.create_table(Stock, STOCKS_TABLE_NAME, order_by=['symbol'], if_not_exists=True) # Optional, depending on schema design
+            # Create/ensure options table (for option contract definitions)
+            db.create_table(Option, OPTIONS_TABLE_NAME, engine='ReplacingMergeTree()', order_by=['contract_symbol'], if_not_exists=True)
+            # Create/ensure option_chains table (for snapshots)
             db.create_table(
                 OptionChain,
                 OPTION_CHAINS_TABLE_NAME,
                 engine='ReplacingMergeTree()', # Use ReplacingMergeTree for upsert-like behavior
-                order_by=['instrument_id', 'timestamp'], # Order by instrument and timestamp
-                primary_key=['instrument_id'], # Primary key can be a prefix of order_by
+                order_by=['contract_symbol', 'timestamp'], # Order by contract symbol and timestamp
+                primary_key=['contract_symbol'], # Primary key can be a prefix of order_by
                 if_not_exists=True
             )
-            self.logger.info("Ensured Instrument and OptionChain tables exist.")
+            self.logger.info("Ensured Instrument, Option, and OptionChain tables exist.")
         except Exception as e:
              self.logger.error(f"Failed to ensure tables exist: {e}")
              # Decide if this is a fatal error or just log and continue
+             # For now, we log and proceed, hoping tables exist or error will occur later
 
 
         self.logger.info(f"Starting parallel collection for {len(tickers_to_collect)} tickers with {max_workers} workers.")
@@ -319,39 +328,56 @@ class YahooFinanceOptionsChainCollector:
                 ticker_symbol = future_to_ticker[future]
                 try:
                     # Get the result from the completed future
-                    # Expecting (option_instruments, option_chains)
-                    option_instruments, option_chains = future.result()
+                    # Expecting (stock_instrument, option_contracts, option_chains)
+                    stock_instrument, option_contracts, option_chains = future.result()
 
                     # Extend the main lists with data from this ticker
-                    all_option_instruments_data.extend(option_instruments)
-                    all_option_chains_data.extend(option_chains) # Extend option_chains_data
+                    if stock_instrument:
+                         all_stock_instruments_data.append(stock_instrument)
+                    all_option_contracts_data.extend(option_contracts)
+                    all_option_chains_data.extend(option_chains)
 
-                    self.logger.info(f"Successfully collected data for {ticker_symbol}. Instruments: {len(option_instruments)}, Option Chains: {len(option_chains)}") # Update log message
+                    self.logger.info(f"Successfully collected data for {ticker_symbol}. Stock Instrument: {'Yes' if stock_instrument else 'No'}, Option Contracts: {len(option_contracts)}, Option Chains: {len(option_chains)}")
 
                 except Exception as exc:
                     # Log any exceptions that occurred in the worker thread
                     self.logger.error(f"Ticker {ticker_symbol} generated an exception: {exc}")
 
         self.logger.info("Parallel collection finished.")
-        self.logger.info(f"Total instruments collected: {len(all_option_instruments_data)}")
-        self.logger.info(f"Total Option Chain snapshots collected: {len(all_option_chains_data)}") # Update log message
+        self.logger.info(f"Total Stock Instruments collected: {len(all_stock_instruments_data)}")
+        self.logger.info(f"Total Option Contracts collected: {len(all_option_contracts_data)}")
+        self.logger.info(f"Total Option Chain snapshots collected: {len(all_option_chains_data)}")
 
 
         # --- Save collected data to the database ---
-        if all_option_instruments_data:
-            self.logger.info(f"Saving {len(all_option_instruments_data)} option instruments...")
+
+        # Save Stock Instruments (to instruments table)
+        if all_stock_instruments_data:
+            self.logger.info(f"Saving {len(all_stock_instruments_data)} stock instruments...")
             try:
-                instruments_df = pd.DataFrame(all_option_instruments_data)
-                # Assuming 'instrument_id' is the unique column for upsert
-                db.upsert_dataframe(instruments_df, INSTRUMENTS_TABLE_NAME, unique_cols=['instrument_id'])
-                self.logger.info("Option instruments saved successfully.")
+                instruments_df = pd.DataFrame(all_stock_instruments_data)
+                # Assuming 'symbol' is the unique column for upsert in the instruments table
+                db.upsert_dataframe(instruments_df, INSTRUMENTS_TABLE_NAME, unique_cols=['symbol'])
+                self.logger.info("Stock instruments saved successfully.")
             except Exception as e:
-                self.logger.error(f"Failed to save option instruments: {e}")
+                self.logger.error(f"Failed to save stock instruments: {e}")
         else:
-            self.logger.info("No new option instruments to save.")
+            self.logger.info("No new stock instruments to save.")
 
+        # Save Option Contracts (to options table)
+        if all_option_contracts_data:
+            self.logger.info(f"Saving {len(all_option_contracts_data)} option contracts...")
+            try:
+                options_df = pd.DataFrame(all_option_contracts_data)
+                # Assuming 'contract_symbol' is the unique column for upsert in the options table
+                db.upsert_dataframe(options_df, OPTIONS_TABLE_NAME, unique_cols=['contract_symbol'])
+                self.logger.info("Option contracts saved successfully.")
+            except Exception as e:
+                self.logger.error(f"Failed to save option contracts: {e}")
+        else:
+            self.logger.info("No new option contracts to save.")
 
-        # Save raw option chain data
+        # Save raw Option Chain snapshots (to option_chains table)
         if all_option_chains_data:
             self.logger.info(f"Saving {len(all_option_chains_data)} Option Chain snapshots...")
             try:
@@ -359,9 +385,8 @@ class YahooFinanceOptionsChainCollector:
                 # Ensure timestamp is in the correct format if needed by upsert_dataframe
                 # ClickHouse DateTime64(3) expects datetime objects or compatible strings
                 # pandas datetime objects should work with clickhouse-connect
-                # Assuming 'instrument_id' and 'timestamp' together form the unique key for snapshots
-                # Note: This assumes you want to potentially overwrite if collecting multiple times at the exact same timestamp
-                db.upsert_dataframe(option_chains_df, OPTION_CHAINS_TABLE_NAME, unique_cols=['instrument_id', 'timestamp']) # Use instrument_id and timestamp as unique key
+                # Assuming 'contract_symbol' and 'timestamp' together form the unique key for snapshots
+                db.upsert_dataframe(option_chains_df, OPTION_CHAINS_TABLE_NAME, unique_cols=['contract_symbol', 'timestamp']) # Use contract_symbol and timestamp as unique key
                 self.logger.info("Option Chain snapshots saved successfully.")
             except Exception as e:
                 self.logger.error(f"Failed to save Option Chain snapshots: {e}")
