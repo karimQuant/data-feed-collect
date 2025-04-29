@@ -20,10 +20,10 @@ class Stock(Instrument):
 class Option(Instrument):
     """Dataclass for an Option instrument."""
     # Inherits symbol (underlying symbol), currency, exchange, name
-    option_type: str # e.g., "call", "put"
-    strike_price: float
     expiration_date: date
-    symbol: str # Option symbol (e.g., "AAPL230920C00150000" for a call option)
+    option_type: str  # 'call' or 'put'
+    strike_price: float
+    option_symbol: str  # Renamed from symbol to avoid parent class conflict
     def __post_init__(self):
         """Validate option_type."""
         if self.option_type.lower() not in ["call", "put"]:
