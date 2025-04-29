@@ -21,58 +21,8 @@ INSTRUMENTS_TABLE_NAME = "instruments" # Assuming a general instruments table
 # OHLCV_TABLE_NAME = "ohlcv" # Remove OHLCV table name
 OPTION_CHAINS_TABLE_NAME = "option_chains" # New table name for raw option chain data
 
-# --- Helper function to generate a consistent option instrument ID ---
-def generate_option_instrument_id(underlying_ticker: str, expiration_date: date, strike: float, contract_type: str) -> str:
-    """Generates a unique ID for an option instrument."""
-    # Format: UNDERLYING_YYYYMMDD_TYPE_STRIKE
-    # Ensure strike is formatted consistently, e.g., remove trailing .0 if integer
-    strike_str = f"{strike:.2f}".rstrip('0').rstrip('.') if isinstance(strike, (int, float)) else str(strike)
-    return f"{underlying_ticker.upper()}_{expiration_date.strftime('%Y%m%d')}_{contract_type.upper()[0]}_{strike_str}"
-
-# --- Helper function to map yfinance option data to OptionChain format ---
-def map_option_snapshot_to_option_chain(
-    instrument_id: str,
-    snapshot_data: Dict[str, Any],
-    collection_timestamp: datetime,
-    # underlying_ticker: str, # Not directly used in mapping to OptionChain fields
-    # expiration_date: date # Not directly used in mapping to OptionChain fields
-) -> Dict[str, Any]:
-    """Maps a single option contract snapshot to an OptionChain dictionary."""
-    # Map directly from the pandas row dictionary to the OptionChain dataclass fields
-    # Handle potential NaN values by letting pandas convert them to None
-    mapped_data = {
-        "instrument_id": instrument_id,
-        "timestamp": collection_timestamp,
-        "contractSymbol": snapshot_data.get('contractSymbol'),
-        # yfinance lastTradeDate can be a timestamp, convert to datetime if needed
-        # Assuming it's already a datetime or convertible by pandas/clickhouse-connect
-        "lastTradeDate": snapshot_data.get('lastTradeDate'),
-        "strike": snapshot_data.get('strike'),
-        "lastPrice": snapshot_data.get('lastPrice'),
-        "bid": snapshot_data.get('bid'),
-        "ask": snapshot_data.get('ask'),
-        "change": snapshot_data.get('change'),
-        "percentChange": snapshot_data.get('percentChange'),
-        "volume": snapshot_data.get('volume'),
-        "openInterest": snapshot_data.get('openInterest'),
-        "impliedVolatility": snapshot_data.get('impliedVolatility'),
-        "inTheMoney": snapshot_data.get('inTheMoney'),
-        "contractSize": snapshot_data.get('contractSize'),
-        "currency": snapshot_data.get('currency'),
-        # Add other fields if they exist in the yfinance data and OptionChain model
-    }
-
-    # Ensure numeric NaNs are converted to None for ClickHouse Nullable types
-    # pandas to_dict() with orient='records' usually handles this, but explicit check is safer
-    # This loop is a safeguard, pandas often handles this correctly for None/NaN
-    for key, value in mapped_data.items():
-        if pd.isna(value):
-            mapped_data[key] = None
-
-    return mapped_data
-
-# Remove map_option_snapshot_to_ohlcv as we are saving raw option chain data
-
+# --- Helper functions moved inside the class as static methods ---
+# Removed module-level definitions
 
 class YahooFinanceOptionsChainCollector:
     """
@@ -87,6 +37,79 @@ class YahooFinanceOptionsChainCollector:
         self.logger = logging.getLogger(__name__)
         # No specific initialization needed for yfinance itself
         pass
+
+    @staticmethod
+    def generate_option_instrument_id(underlying_ticker: str, expiration_date: date, strike: float, contract_type: str) -> str:
+        """Generates a unique ID for an option instrument."""
+        # Format: UNDERLYING_YYYYMMDD_TYPE_STRIKE
+        # Ensure strike is formatted consistently, e.g., remove trailing .0 if integer
+        strike_str = f"{strike:.2f}".rstrip('0').rstrip('.') if isinstance(strike, (int, float)) else str(strike)
+        return f"{underlying_ticker.upper()}_{expiration_date.strftime('%Y%m%d')}_{contract_type.upper()[0]}_{strike_str}"
+
+    @staticmethod
+    def map_option_snapshot_to_instrument(
+        instrument_id: str,
+        underlying_ticker: str,
+        expiration_date: date,
+        snapshot_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Maps a single option contract snapshot to an Instrument-like dictionary."""
+        # Assuming Instrument table has columns like:
+        # instrument_id (PK), symbol (e.g., option symbol like AAPL250117C00150000),
+        # instrument_type ('option'), underlying_symbol, strike, expiration_date, contract_type
+        return {
+            "instrument_id": instrument_id,
+            "symbol": snapshot_data.get('contractSymbol'), # yfinance contract symbol
+            "instrument_type": "option",
+            "underlying_symbol": underlying_ticker.upper(),
+            "strike": snapshot_data.get('strike'),
+            "expiration_date": expiration_date,
+            "contract_type": snapshot_data.get('contractType'), # 'call' or 'put'
+            # Add other relevant fields from snapshot if needed, e.g., currency
+        }
+
+    @staticmethod
+    def map_option_snapshot_to_option_chain(
+        instrument_id: str,
+        snapshot_data: Dict[str, Any],
+        collection_timestamp: datetime,
+        # underlying_ticker: str, # Not directly used in mapping to OptionChain fields
+        # expiration_date: date # Not directly used in mapping to OptionChain fields
+    ) -> Dict[str, Any]:
+        """Maps a single option contract snapshot to an OptionChain dictionary."""
+        # Map directly from the pandas row dictionary to the OptionChain dataclass fields
+        # Handle potential NaN values by letting pandas convert them to None
+        mapped_data = {
+            "instrument_id": instrument_id,
+            "timestamp": collection_timestamp,
+            "contractSymbol": snapshot_data.get('contractSymbol'),
+            # yfinance lastTradeDate can be a timestamp, convert to datetime if needed
+            # Assuming it's already a datetime or convertible by pandas/clickhouse-connect
+            "lastTradeDate": snapshot_data.get('lastTradeDate'),
+            "strike": snapshot_data.get('strike'),
+            "lastPrice": snapshot_data.get('lastPrice'),
+            "bid": snapshot_data.get('bid'),
+            "ask": snapshot_data.get('ask'),
+            "change": snapshot_data.get('change'),
+            "percentChange": snapshot_data.get('percentChange'),
+            "volume": snapshot_data.get('volume'),
+            "openInterest": snapshot_data.get('openInterest'),
+            "impliedVolatility": snapshot_data.get('impliedVolatility'),
+            "inTheMoney": snapshot_data.get('inTheMoney'),
+            "contractSize": snapshot_data.get('contractSize'),
+            "currency": snapshot_data.get('currency'),
+            # Add other fields if they exist in the yfinance data and OptionChain model
+        }
+
+        # Ensure numeric NaNs are converted to None for ClickHouse Nullable types
+        # pandas to_dict() with orient='records' usually handles this, but explicit check is safer
+        # This loop is a safeguard, pandas often handles this correctly for None/NaN
+        for key, value in mapped_data.items():
+            if pd.isna(value):
+                mapped_data[key] = None
+
+        return mapped_data
+
 
     def _collect_single_ticker(self, ticker_symbol: str, collection_timestamp: datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
@@ -149,18 +172,18 @@ class YahooFinanceOptionsChainCollector:
                     # Process each option contract in the chain
                     for index, row in combined_df.iterrows():
                         try:
-                            # Generate unique instrument ID
-                            instrument_id = generate_option_instrument_id(
+                            # Generate unique instrument ID using the static method
+                            instrument_id = self.generate_option_instrument_id(
                                 underlying_ticker=ticker_symbol,
                                 expiration_date=expiration_date,
                                 strike=row['strike'],
                                 contract_type=row['contractType']
                             )
 
-                            # Map data for Instrument table (only add if not already seen?)
+                            # Map data for Instrument table using the static method
                             # For simplicity, we'll add it every time and rely on DB upsert
                             # to handle duplicates based on instrument_id.
-                            option_instrument_data = map_option_snapshot_to_instrument(
+                            option_instrument_data = self.map_option_snapshot_to_instrument(
                                 instrument_id=instrument_id,
                                 underlying_ticker=ticker_symbol,
                                 expiration_date=expiration_date,
@@ -168,8 +191,8 @@ class YahooFinanceOptionsChainCollector:
                             )
                             option_instruments_data.append(option_instrument_data)
 
-                            # Map data for OptionChain table (snapshot)
-                            option_chain_snapshot_data = map_option_snapshot_to_option_chain(
+                            # Map data for OptionChain table (snapshot) using the static method
+                            option_chain_snapshot_data = self.map_option_snapshot_to_option_chain(
                                 instrument_id=instrument_id,
                                 snapshot_data=row.to_dict(), # Pass row as dict
                                 collection_timestamp=collection_timestamp,
