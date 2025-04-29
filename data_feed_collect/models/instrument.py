@@ -23,7 +23,7 @@ class Option(Instrument):
     option_type: str # e.g., "call", "put"
     strike_price: float
     expiration_date: date
-
+    symbol: str # Option symbol (e.g., "AAPL230920C00150000" for a call option)
     def __post_init__(self):
         """Validate option_type."""
         if self.option_type.lower() not in ["call", "put"]:
