@@ -53,11 +53,19 @@ def _map_python_type_to_clickhouse(py_type: Type) -> str:
 
 class DataBase:
     """
-    A class to interact with a ClickHouse database.
+    A class to interact with a ClickHouse database using clickhouse-connect.
 
     Provides methods to execute SQL queries, perform upserts using pandas DataFrames,
     and create tables from dataclass definitions. Connection details are read from
     environment variables by default.
+
+    Note: This class holds a single clickhouse-connect client instance. While
+    session ID generation is disabled to mitigate session-related concurrency
+    issues (as per clickhouse-connect documentation for shared clients),
+    instances of this class may still require external synchronization or
+    management (e.g., using a connection pool or thread-local instances)
+    if used concurrently across multiple threads or processes, depending on
+    specific usage patterns and underlying library behavior.
     """
     def __init__(
         self,
@@ -112,7 +120,11 @@ class DataBase:
             port=db_port,
             database=db_database,
             username=db_user,
-            password=db_password
+            password=db_password,
+            # Disable session ID generation to mitigate session-related concurrency issues
+            # when using a single client instance across potential concurrent calls.
+            # Note: This disables ClickHouse session features like SET commands or temporary tables.
+            autogenerate_session_id=False
         )
 
     def execute_query(self, query: str) -> pd.DataFrame:
