@@ -28,6 +28,9 @@ dev = [
     "isort>=5.0.0"
 ]
 
+[tool.setuptools]
+packages = ["data_feed_collect"]
+
 [tool.black]
 line-length = 88
 target-version = ["py310"]
