@@ -1,30 +1,37 @@
+"""Database interaction class for ClickHouse."""
+
+import os
+from typing import List, Dict, Any, Type, Optional
+from datetime import datetime, date
 import pandas as pd
 import clickhouse_connect
-import os
-import dataclasses # Import dataclasses
+import logging
+from dataclasses import fields, is_dataclass
 import typing # Import typing for get_origin, get_args
-from typing import List, Optional, Type # Keep specific imports
-from datetime import datetime, date # Import datetime and date for type mapping
-from dotenv import load_dotenv
 
-# Load environment variables from a .env file if it exists
-load_dotenv()
+# Ensure these imports are available if needed for type mapping, though
+# the current map uses built-in types and datetime/date
+# from uuid import UUID
+# from decimal import Decimal
 
-# Basic mapping from Python types to ClickHouse types
-# Note: This is a basic mapping and might need expansion for more complex types
+# Mapping Python types to ClickHouse types
+# Note: ClickHouse types can be Nullable(Type) for optional fields.
+# clickhouse-connect handles mapping Python None to Nullable types automatically.
 PYTHON_TO_CLICKHOUSE_TYPE_MAP = {
     str: "String",
     int: "Int64", # Using Int64 as a safe default
     float: "Float64",
-    bool: "UInt8", # ClickHouse uses numeric types for boolean
+    bool: "UInt8", # ClickHouse uses numeric types for boolean (0 or 1)
     datetime: "DateTime64(3)", # Using DateTime64 with millisecond precision
     date: "Date",
     # Add more mappings as needed (e.g., UUID, Decimal)
+    # UUID: "UUID",
+    # Decimal: "Decimal(18, 9)", # Example Decimal mapping
 }
 
 def _map_python_type_to_clickhouse(py_type: Type) -> str:
-    """Maps a Python type to a ClickHouse type string, handling Optional."""
-    is_nullable = False
+    """Maps a Python type (or Optional type) to a ClickHouse type string."""
+    # Handle Optional types: get the inner type and make it Nullable
     origin = typing.get_origin(py_type)
     args = typing.get_args(py_type)
 
@@ -32,23 +39,32 @@ def _map_python_type_to_clickhouse(py_type: Type) -> str:
         # Check if it's an Optional (Union with NoneType)
         if len(args) == 2 and type(None) in args:
             # Find the actual type T
-            actual_type = args[0] if args[1] is type(None) else args[1]
-            py_type = actual_type
-            is_nullable = True
+            actual_type = next((arg for arg in args if arg is not type(None)), None)
+            if actual_type:
+                py_type = actual_type # Use the inner type for mapping
+                # Now map the inner type and mark as nullable
+                ch_type = PYTHON_TO_CLICKHOUSE_TYPE_MAP.get(py_type)
+                if ch_type:
+                    return f"Nullable({ch_type})"
+                else:
+                     raise TypeError(f"No ClickHouse mapping found for inner type {py_type.__name__} in Optional[{py_type.__name__}]")
+            else:
+                 raise TypeError(f"Could not determine inner type for Optional type {py_type}")
         else:
              # Handle other Union types if needed, for now raise error
              raise TypeError(f"Unsupported Union type structure: {py_type}")
     elif origin is not None:
          # Handle other generic types like List, Dict, etc.
+         # For now, raise an error or map to String if appropriate
          raise TypeError(f"Unsupported generic type: {py_type}. Consider using String or specialized ClickHouse types.")
 
 
+    # Handle non-Optional types
     ch_type = PYTHON_TO_CLICKHOUSE_TYPE_MAP.get(py_type)
-
-    if ch_type is None:
-        raise TypeError(f"No direct ClickHouse mapping found for Python type: {py_type}")
-
-    return f"Nullable({ch_type})" if is_nullable else ch_type
+    if ch_type:
+        return ch_type
+    else:
+        raise TypeError(f"No ClickHouse mapping found for Python type {py_type.__name__}")
 
 
 class DataBase:
@@ -62,11 +78,12 @@ class DataBase:
     Note: This class holds a single clickhouse-connect client instance. While
     session ID generation is disabled to mitigate session-related concurrency
     issues (as per clickhouse-connect documentation for shared clients),
-    instances of this class may still require external synchronization or
-    management (e.g., using a connection pool or thread-local instances)
-    if used concurrently across multiple threads or processes, depending on
-    specific usage patterns and underlying library behavior.
+    concurrent access from multiple threads/processes writing to the *same*
+    client instance might still require external synchronization if not using
+    bulk operations like upsert_dataframe. Reading via execute_query is generally
+    safer for concurrent access. For heavy concurrent writes, consider a connection pool.
     """
+
     def __init__(
         self,
         host: Optional[str] = None,
@@ -76,109 +93,122 @@ class DataBase:
         password: Optional[str] = None
     ):
         """
-        Initializes the DataBase connection.
+        Initializes the database connection. Reads credentials from environment
+        variables if not provided.
 
-        Connection details are read from arguments first, then from environment
-        variables (CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_DATABASE,
-        CLICKHOUSE_USER, CLICKHOUSE_PASSWORD).
-
-        Args:
-            host: The database host address. Defaults to env var CLICKHOUSE_HOST.
-            port: The database port. Defaults to env var CLICKHOUSE_PORT.
-            database: The database name. Defaults to env var CLICKHOUSE_DATABASE.
-            user: The database user. Defaults to env var CLICKHOUSE_USER.
-            password: The database password (optional). Defaults to env var CLICKHOUSE_PASSWORD.
+        Environment variables used:
+        - CLICKHOUSE_HOST (default: 'localhost')
+        - CLICKHOUSE_PORT (default: 8123)
+        - CLICKHOUSE_DATABASE (default: 'default')
+        - CLICKHOUSE_USER (default: 'default')
+        - CLICKHOUSE_PASSWORD (default: '')
         """
-        # Use provided arguments or fall back to environment variables
-        db_host = host if host is not None else os.getenv("CLICKHOUSE_HOST")
-        db_port_str = str(port) if port is not None else os.getenv("CLICKHOUSE_PORT") # Get as string first
-        db_database = database if database is not None else os.getenv("CLICKHOUSE_DATABASE")
-        db_user = user if user is not None else os.getenv("CLICKHOUSE_USER")
-        db_password = password if password is not None else os.getenv("CLICKHOUSE_PASSWORD")
+        self.logger = logging.getLogger(__name__)
 
-        # Convert port to int, handling potential errors
-        db_port = None
-        if db_port_str:
-            try:
-                db_port = int(db_port_str)
-            except ValueError:
-                print(f"Warning: Invalid value for CLICKHOUSE_PORT environment variable: {db_port_str}. Must be an integer.")
-                # Keep db_port as None, will raise error below if required
+        self.host = host or os.environ.get("CLICKHOUSE_HOST", "localhost")
+        self.port = port or int(os.environ.get("CLICKHOUSE_PORT", 8123))
+        self.database = database or os.environ.get("CLICKHOUSE_DATABASE", "default")
+        self.user = user or os.environ.get("CLICKHOUSE_USER", "default")
+        self.password = password or os.environ.get("CLICKHOUSE_PASSWORD", "")
 
-        # Ensure required parameters are available
-        if not db_host or not db_port or not db_database or not db_user:
-             missing = []
-             if not db_host: missing.append("host (or CLICKHOUSE_HOST)")
-             if not db_port: missing.append("port (or CLICKHOUSE_PORT)")
-             if not db_database: missing.append("database (or CLICKHOUSE_DATABASE)")
-             if not db_user: missing.append("user (or CLICKHOUSE_USER)")
-             raise ValueError(f"Missing required database connection parameters: {', '.join(missing)}")
+        self.client: Optional[clickhouse_connect.ClickHouseClient] = None
+        self._connect()
 
-
-        self._client = clickhouse_connect.get_client(
-            host=db_host,
-            port=db_port,
-            database=db_database,
-            username=db_user,
-            password=db_password,
-            # Disable session ID generation to mitigate session-related concurrency issues
-            # when using a single client instance across potential concurrent calls.
-            # Note: This disables ClickHouse session features like SET commands or temporary tables.
-            autogenerate_session_id=False
-        )
+    def _connect(self):
+        """Establishes the connection to the ClickHouse database."""
+        try:
+            self.client = clickhouse_connect.get_client(
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                username=self.user,
+                password=self.password,
+                # Disable session ID generation for shared client instance
+                session_id_generator=None
+            )
+            # Test connection
+            self.client.command('SELECT 1')
+            self.logger.info(f"Connected to ClickHouse database '{self.database}' at {self.host}:{self.port}")
+        except Exception as e:
+            self.logger.error(f"Failed to connect to ClickHouse: {e}")
+            self.client = None # Ensure client is None if connection fails
+            raise # Re-raise the exception after logging
 
     def execute_query(self, query: str) -> pd.DataFrame:
         """
-        Executes a SQL query and returns the result as a pandas DataFrame.
+        Executes a read query and returns the result as a pandas DataFrame.
 
         Args:
-            query: The SQL query string to execute.
+            query: The SQL query string.
 
         Returns:
-            A pandas DataFrame containing the query results.
+            A pandas DataFrame containing the query results. Returns an empty
+            DataFrame if the client is not connected or an error occurs.
         """
+        if not self.client:
+            self.logger.error("Cannot execute query: Database client is not connected.")
+            return pd.DataFrame()
         try:
-            df = self._client.query_df(query)
-            return df
+            self.logger.debug(f"Executing query: {query}")
+            result = self.client.query(query)
+            return result.result_df
         except Exception as e:
-            print(f"Error executing query: {e}")
-            raise # Re-raise the exception after printing
+            self.logger.error(f"Error executing query: {e}\nQuery: {query}")
+            return pd.DataFrame() # Return empty DataFrame on error
+
+    def execute_command(self, command: str):
+         """
+         Executes a command (e.g., CREATE TABLE, INSERT, ALTER).
+
+         Args:
+             command: The SQL command string.
+         """
+         if not self.client:
+             self.logger.error("Cannot execute command: Database client is not connected.")
+             return
+         try:
+             self.logger.debug(f"Executing command: {command}")
+             self.client.command(command)
+             self.logger.debug("Command executed successfully.")
+         except Exception as e:
+             self.logger.error(f"Error executing command: {e}\nCommand: {command}")
+             raise # Re-raise the exception
 
     def upsert_dataframe(self, df: pd.DataFrame, table_name: str, unique_cols: List[str]):
         """
-        Inserts or updates data from a pandas DataFrame into a ClickHouse table.
+        Performs an upsert operation using a pandas DataFrame.
+        This method leverages ClickHouse's ReplacingMergeTree or similar engines
+        by inserting data. ClickHouse handles the deduplication based on the
+        engine's primary key or sorting key.
 
-        Note: ClickHouse does not have a standard 'UPSERT' statement like other
-        databases. This method performs an efficient insert using clickhouse-connect.
-        For true upsert behavior based on `unique_cols`, the target table must
-        be configured appropriately (e.g., using a ReplacingMergeTree engine
-        with a suitable primary key and/or version column, or requiring manual
-        mutation logic outside this method).
-
-        This method primarily uses `client.insert_df`, which is highly efficient
-        for bulk inserts. If the table is a ReplacingMergeTree and `unique_cols`
-        correspond to the primary key, inserting new data with higher version
-        will replace older rows with the same primary key.
+        Note: For ReplacingMergeTree, the 'unique_cols' should typically correspond
+        to the table's ORDER BY key. For unique constraints, you might need
+        a different engine or approach (e.g., Unique engine, though less common).
+        This method assumes the table engine handles deduplication on insert.
 
         Args:
-            df: The pandas DataFrame containing the data to upsert.
-            table_name: The name of the target table in ClickHouse.
+            df: The pandas DataFrame to upsert.
+            table_name: The name of the target table.
             unique_cols: A list of column names that define uniqueness.
-                         (Used for documentation/intent; actual upsert logic
-                         depends on ClickHouse table engine configuration).
+                         Used here primarily for logging/context, as the actual
+                         deduplication logic is engine-dependent.
         """
-        if not unique_cols:
-             print("Warning: unique_cols list is empty. This operation will perform a simple insert.")
+        if not self.client:
+            self.logger.error("Cannot upsert dataframe: Database client is not connected.")
+            return
+        if df.empty:
+            self.logger.info(f"DataFrame for table '{table_name}' is empty. Skipping upsert.")
+            return
 
+        self.logger.info(f"Upserting {len(df)} rows into table '{table_name}' (unique on {unique_cols})...")
         try:
-            # clickhouse-connect's insert_df is the most efficient way to load data
-            # The actual upsert behavior depends on the table engine (e.g., ReplacingMergeTree)
-            # and how unique_cols relate to the primary key and version column.
-            self._client.insert_df(table_name, df)
-            print(f"Successfully inserted/upserted {len(df)} rows into table '{table_name}'.")
+            # clickhouse-connect's insert handles DataFrame directly
+            # It automatically maps pandas dtypes to ClickHouse types and handles None/NaN
+            self.client.insert_df(table_name, df)
+            self.logger.info(f"Successfully upserted {len(df)} rows into '{table_name}'.")
         except Exception as e:
-            print(f"Error inserting/upserting data into table '{table_name}': {e}")
-            raise # Re-raise the exception after printing
+            self.logger.error(f"Error upserting dataframe into '{table_name}': {e}")
+            raise # Re-raise the exception
 
     def create_table(
         self,
@@ -186,73 +216,80 @@ class DataBase:
         table_name: str,
         engine: str = 'MergeTree()',
         order_by: Optional[List[str]] = None,
-        primary_key: Optional[List[str]] = None,
+        primary_key: Optional[List[str]] = None, # Often same as order_by for MergeTree
         if_not_exists: bool = True
     ):
         """
         Creates a ClickHouse table based on a dataclass definition.
 
         Args:
-            dataclass_type: The Python dataclass type to use for the schema.
-            table_name: The name of the table to create in ClickHouse.
-            engine: The ClickHouse table engine (e.g., 'MergeTree()', 'ReplacingMergeTree(version_column)').
-                    Defaults to 'MergeTree()'.
-            order_by: A list of column names for the ORDER BY clause. Required for MergeTree family engines.
-            primary_key: A list of column names for the PRIMARY KEY clause (optional).
-            if_not_exists: If True, adds 'IF NOT EXISTS' to the CREATE TABLE statement.
+            dataclass_type: The Python dataclass type defining the table schema.
+            table_name: The name of the table to create.
+            engine: The ClickHouse table engine (default: 'MergeTree()').
+            order_by: List of column names for the ORDER BY clause. Required for MergeTree.
+            primary_key: List of column names for the PRIMARY KEY clause (optional, often same as ORDER BY).
+            if_not_exists: If True, adds IF NOT EXISTS to the CREATE TABLE statement.
         """
-        if not dataclasses.is_dataclass(dataclass_type):
-            raise TypeError(f"Provided type {dataclass_type} is not a dataclass.")
+        if not is_dataclass(dataclass_type):
+            raise TypeError(f"Provided type {dataclass_type.__name__} is not a dataclass.")
 
-        # Check for required ORDER BY for MergeTree family engines
         if 'MergeTree' in engine and not order_by:
-             raise ValueError(f"ORDER BY clause is required for MergeTree family engines like '{engine}'. Please provide 'order_by'.")
+             raise ValueError("ORDER BY clause is required for MergeTree engine.")
 
         columns = []
-        for field in dataclasses.fields(dataclass_type):
+        for field in fields(dataclass_type):
             try:
                 ch_type = _map_python_type_to_clickhouse(field.type)
                 columns.append(f"`{field.name}` {ch_type}")
             except TypeError as e:
-                # Re-raise with more context
-                raise TypeError(f"Unsupported type for field '{field.name}' in dataclass '{dataclass_type.__name__}': {e}")
-
+                self.logger.error(f"Could not map type for field '{field.name}' in dataclass '{dataclass_type.__name__}': {e}")
+                raise # Stop if a type cannot be mapped
 
         columns_sql = ",\n    ".join(columns)
 
-        create_sql = f"CREATE TABLE {'IF NOT EXISTS ' if if_not_exists else ''}`{table_name}` (\n    {columns_sql}\n)"
-        create_sql += f" ENGINE = {engine}"
-
+        order_by_sql = ""
         if order_by:
-            order_by_sql = ", ".join([f"`{col}`" for col in order_by])
-            create_sql += f"\nORDER BY ({order_by_sql})"
+            order_by_sql = f"\nORDER BY ({', '.join([f'`{col}`' for col in order_by])})"
 
+        primary_key_sql = ""
         if primary_key:
-            primary_key_sql = ", ".join([f"`{col}`" for col in primary_key])
-            create_sql += f"\nPRIMARY KEY ({primary_key_sql})"
+             primary_key_sql = f"\nPRIMARY KEY ({', '.join([f'`{col}`' for col in primary_key])})"
+             # Note: PRIMARY KEY is usually a prefix of ORDER BY for MergeTree
 
-        print(f"Attempting to create table '{table_name}'...")
-        # print(f"Executing CREATE TABLE query:\n{create_sql}") # Uncomment for debugging
+        create_table_sql = f"""
+        CREATE TABLE {'IF NOT EXISTS ' if if_not_exists else ''}`{table_name}` (
+            {columns_sql}
+        ) ENGINE = {engine}{order_by_sql}{primary_key_sql}
+        """
 
+        self.logger.info(f"Attempting to create table '{table_name}'...")
         try:
-            # Use the command method for DDL statements as recommended by clickhouse-connect docs
-            self._client.command(create_sql)
-            print(f"Table '{table_name}' created successfully (or already exists).")
+            self.execute_command(create_table_sql)
+            self.logger.info(f"Table '{table_name}' created or already exists.")
         except Exception as e:
-            print(f"Error creating table '{table_name}': {e}")
+            self.logger.error(f"Failed to create table '{table_name}': {e}")
             raise # Re-raise the exception
-
 
     def close(self):
         """Closes the database connection."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        if self.client:
+            try:
+                self.client.close()
+                self.logger.info("ClickHouse connection closed.")
+            except Exception as e:
+                self.logger.error(f"Error closing ClickHouse connection: {e}")
+            finally:
+                self.client = None
 
     def __enter__(self):
-        """Context manager entry."""
+        """Context manager entry point."""
+        # Connection is established in __init__
+        if not self.client:
+             # Attempt to reconnect if not connected
+             self._connect()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+        """Context manager exit point."""
         self.close()
+
