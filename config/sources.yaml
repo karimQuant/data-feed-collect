@@ -27,3 +27,16 @@ sources:
     format: csv
     encoding: utf-8
     delimiter: ','
+
+  # New Yahoo Finance Options Chain Source
+  # This collector fetches options for multiple tickers and saves to DB
+  yahoo_options_chain:
+    type: yahoo_options_chain # This type will map to the YahooFinanceOptionsChainCollector
+    # Configure which tickers to collect options for:
+    # Option 1: Fetch all stock tickers currently in the database's instruments table
+    fetch_tickers_from_db: true
+    # Option 2: Specify a list of tickers directly in the config
+    # tickers: ["AAPL", "MSFT", "GOOGL"]
+    # Note: If fetch_tickers_from_db is true, the 'tickers' list is ignored unless DB fetch fails.
+    # Note: Rate limiting for this source type is handled centrally
+    # by the utility in data_feed_collect.utils.rate_limiter
