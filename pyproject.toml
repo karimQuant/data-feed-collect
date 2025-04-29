@@ -16,8 +16,9 @@ dependencies = [
     "requests>=2.31.0",
     "pyyaml>=6.0",
     "sqlalchemy>=2.0.0",
-    "pandas>=2.0.0",
-    "click>=8.1.0"
+    "pandas>=2.0.0", # Added pandas
+    "click>=8.1.0",
+    "clickhouse-connect>=0.7.0" # Added clickhouse-connect
 ]
 
 [project.optional-dependencies]
