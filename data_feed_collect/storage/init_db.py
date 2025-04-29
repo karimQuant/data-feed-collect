@@ -60,7 +60,8 @@ TABLE_CONFIGS = [
     {
         "model": OptionChain,
         "table_name": "option_chains",
-        "order_by": ["instrument_id", "collection_timestamp"], # Option chains ordered by instrument and collection time
+        # FIX: Changed 'collection_timestamp' to 'timestamp' to match the dataclass field name
+        "order_by": ["instrument_id", "timestamp"], # Option chains ordered by instrument and collection time
         "engine": "MergeTree()"
     },
 ]
