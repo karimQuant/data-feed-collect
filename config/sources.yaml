@@ -1,0 +1,29 @@
+# Example configuration for data sources
+
+sources:
+  example_api:
+    type: api
+    url: https://api.example.com/data
+    method: get
+    headers:
+      Content-Type: application/json
+    auth:
+      type: api_key
+      key_name: api_key
+      # The actual key would be loaded from environment variables
+    rate_limit: 100  # requests per minute
+    retry:
+      max_attempts: 3
+      backoff_factor: 2  # seconds
+
+  example_rss:
+    type: rss
+    url: https://example.com/feed.rss
+    refresh_interval: 600  # seconds
+
+  example_file:
+    type: file
+    path: /path/to/data/file.csv
+    format: csv
+    encoding: utf-8
+    delimiter: ','

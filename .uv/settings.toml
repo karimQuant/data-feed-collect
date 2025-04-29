@@ -1,0 +1,19 @@
+# uv configuration settings
+
+[python]
+version = "3.10.0+"
+
+[verbosity]
+level = "info"
+
+[resolver]
+exclude-newer = true
+
+[resolution]
+allowlist = ["pypi"]
+
+[package]
+revision = "latest"
+
+[installable]
+index-url = "https://pypi.org/simple/"
