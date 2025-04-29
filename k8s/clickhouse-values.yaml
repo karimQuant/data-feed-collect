@@ -18,15 +18,15 @@ service:
 # Configure data persistence
 persistence:
   enabled: true
-  size: 10Gi # Request 10GB of storage for the data volume
+  size: 50Gi # Request 10GB of storage for the data volume
   # storageClass: standard # Uncomment and specify your storage class if needed
 
 # You can add other configurations here, e.g., resource limits, replicas, etc.
-# replicaCount: 1
-# resources:
-#   requests:
-#     cpu: "500m"
-#     memory: "1Gi"
-#   limits:
-#     cpu: "1"
-#     memory: "2Gi"
+replicaCount: 1
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "4"
+    memory: "16Gi"
