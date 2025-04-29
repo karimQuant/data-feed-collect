@@ -124,7 +124,8 @@ class DataBase:
                 username=self.user,
                 password=self.password,
                 # Disable session ID generation for shared client instance
-                session_id_generator=None
+                # This argument is removed as it's not supported in newer clickhouse-connect versions
+                # session_id_generator=None
             )
             # Test connection
             self.client.command('SELECT 1')
@@ -292,4 +293,3 @@ class DataBase:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit point."""
         self.close()
-
