@@ -163,7 +163,9 @@ class YahooFinanceOptionsChainCollector:
 
                     # Process calls and puts
                     calls_df = option_chain.calls
+                    calls_df['contractType'] = 'Call'
                     puts_df = option_chain.puts
+                    puts_df['contractType'] = 'Put'
 
                     # Combine and process
                     combined_df = pd.concat([calls_df, puts_df], ignore_index=True)
