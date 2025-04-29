@@ -15,6 +15,9 @@ from data_feed_collect.models.option_chain import OptionChain # Import the new O
 # from data_feed_collect.storage.database import DataBase # Use Any for db type hint
 # Import limiter and the key from the utils package
 from data_feed_collect.utils import limiter, YAHOO_FINANCE_LIMIT_KEY
+# Import the new logging setup function
+from data_feed_collect.utils.logging_config import setup_logging
+
 
 # Assume table names based on test file summary and new requirement
 INSTRUMENTS_TABLE_NAME = "instruments" # Assuming a general instruments table
@@ -371,10 +374,10 @@ if __name__ == '__main__':
     from dotenv import load_dotenv
     import os
 
-    load_dotenv() # Load environment variables from .env
+    # Setup logging first
+    setup_logging(logging.INFO)
 
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    load_dotenv() # Load environment variables from .env
 
     try:
         # Initialize DB connection
