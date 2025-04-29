@@ -273,36 +273,36 @@ class YahooFinanceOptionsChainCollector:
 
 # Example usage (for testing purposes, not part of the class)
 # This block would typically be orchestrated by the main DataCollector class
-# if __name__ == '__main__':
-#     # This requires a running ClickHouse instance and environment variables set
-#     # Also requires the Instrument table to exist and potentially contain stock tickers
-#     from data_feed_collect.storage.database import DataBase
-#     from dotenv import load_dotenv
-#     import os
-#
-#     load_dotenv() # Load environment variables from .env
-#
-#     # Configure logging
-#     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-#
-#     try:
-#         # Initialize DB connection
-#         # Assumes DB connection details are in environment variables
-#         db_conn = DataBase()
-#
-#         # Example config: fetch tickers from DB
-#         config = {"fetch_tickers_from_db": True}
-#
-#         # Example config: specify tickers directly
-#         # config = {"tickers": ["AAPL", "MSFT"]}
-#
-#         collector = YahooFinanceOptionsChainCollector()
-#         collector.collect(config, db_conn)
-#
-#     except Exception as e:
-#         logging.error(f"An error occurred during the example run: {e}")
-#     finally:
-#         if 'db_conn' in locals() and db_conn:
-#             db_conn.close()
-#             logging.info("Database connection closed.")
+if __name__ == '__main__':
+    # This requires a running ClickHouse instance and environment variables set
+    # Also requires the Instrument table to exist and potentially contain stock tickers
+    from data_feed_collect.storage.database import DataBase
+    from dotenv import load_dotenv
+    import os
+
+    load_dotenv() # Load environment variables from .env
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    try:
+        # Initialize DB connection
+        # Assumes DB connection details are in environment variables
+        db_conn = DataBase()
+
+        # Example config: fetch tickers from DB
+        config = {"fetch_tickers_from_db": True}
+
+        # Example config: specify tickers directly
+        # config = {"tickers": ["AAPL", "MSFT"]}
+
+        collector = YahooFinanceOptionsChainCollector()
+        collector.collect(config, db_conn)
+
+    except Exception as e:
+        logging.error(f"An error occurred during the example run: {e}")
+    finally:
+        if 'db_conn' in locals() and db_conn:
+            db_conn.close()
+            logging.info("Database connection closed.")
 
