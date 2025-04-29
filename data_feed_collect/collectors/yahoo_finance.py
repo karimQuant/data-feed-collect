@@ -13,6 +13,7 @@ import concurrent.futures # Import concurrent.futures for threading
 # from data_feed_collect.models.ohlcv import OHLCV
 # from data_feed_collect.storage.database import DataBase
 # Import limiter and the key from the utils package
+# The limiter object is now a pyrate_limiter.Limiter instance
 from data_feed_collect.utils import limiter, YAHOO_FINANCE_LIMIT_KEY
 
 # Define the key used for rate limiting Yahoo Finance requests
@@ -116,10 +117,13 @@ class YahooFinanceOptionsChainCollector:
 
         try:
             # Use the centralized rate limiter before making the request
+            # The key identifies the item being rate-limited.
+            # delay=True means it will wait if the limit is reached.
             with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
                 ticker = yf.Ticker(ticker_symbol)
 
             # Get available expiration dates
+            # Apply rate limit again for the next API call
             with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
                  expiration_dates = ticker.options
 
@@ -134,6 +138,7 @@ class YahooFinanceOptionsChainCollector:
                     # Parse the date string into a date object
                     expiration_date = datetime.strptime(date_str, '%Y-%m-%d').date()
 
+                    # Apply rate limit again for fetching option chain for a specific date
                     with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
                         # Get option chain for the specific date
                         option_chain = ticker.option_chain(date_str)

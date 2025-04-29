@@ -1,20 +1,21 @@
 """Centralized RateLimiter instance for managing API call rates."""
 
-from pyratelimiter import RateLimiter
+# Import the correct classes: Limiter, Rate, Duration
+from pyrate_limiter import Limiter, Rate, Duration
 
 # Define the key used for rate limiting Yahoo Finance requests
 # This is defined here to keep the limiter configuration self-contained
 YAHOO_FINANCE_LIMIT_KEY = 'yahoo_finance'
 
-# Initialize the RateLimiter instance
+# Define the rate for Yahoo Finance: 60 calls per minute
+yahoo_finance_rate = Rate(limit=60, interval=Duration.MINUTE)
+
+# Initialize the Limiter instance with the defined rate(s)
 # This instance will be shared across the application
-limiter = RateLimiter()
+limiter = Limiter(yahoo_finance_rate)
 
-# Add the rate limit rule for Yahoo Finance: 60 calls per minute
-# The key 'yahoo_finance' must match the key used in the collectors
-limiter.add_rule(calls=60, period=60, key=YAHOO_FINANCE_LIMIT_KEY)
-
-# You can add more rules for different APIs here if needed
-# Example: limiter.add_rule(calls=100, period=3600, key='another_api')
+# You can add more rates for different APIs here if needed
+# Example: another_api_rate = Rate(limit=100, interval=Duration.HOUR)
+# limiter = Limiter([yahoo_finance_rate, another_api_rate])
 
 # The 'limiter' object is now ready to be imported and used
