@@ -4,7 +4,7 @@
 
 # Define variables
 RELEASE_NAME="clickhouse"
-NAMESPACE="default" # Or your desired namespace
+NAMESPACE="data-collect-feed" # Or your desired namespace
 CHART_REPO="bitnami"
 CHART_NAME="clickhouse"
 CHART_VERSION="1.x.x" # Specify a chart version, check https://artifacthub.io/packages/helm/bitnami/clickhouse
