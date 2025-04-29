@@ -16,9 +16,10 @@ dependencies = [
     "requests>=2.31.0",
     "pyyaml>=6.0",
     "sqlalchemy>=2.0.0",
-    "pandas>=2.0.0", # Added pandas
+    "pandas>=2.0.0",
     "click>=8.1.0",
-    "clickhouse-connect>=0.7.0" # Added clickhouse-connect
+    "clickhouse-connect>=0.7.0",
+    "python-dotenv>=1.0.0" # Added python-dotenv
 ]
 
 [project.optional-dependencies]
