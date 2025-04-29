@@ -1,10 +1,13 @@
 """
 Script to initialize the ClickHouse database by creating tables
 for all defined models.
+
+Includes an option to drop existing tables before creation.
 """
 
 import logging
 import sys
+import argparse # Import argparse for command-line arguments
 
 # Add the project root to the sys.path if running from the root
 # This helps in importing modules like data_feed_collect
@@ -62,13 +65,35 @@ TABLE_CONFIGS = [
     },
 ]
 
-def initialize_database():
-    """Initializes the database by creating all necessary tables."""
+def initialize_database(drop_existing: bool = False):
+    """
+    Initializes the database by creating all necessary tables.
+
+    Args:
+        drop_existing: If True, drops tables if they exist before creating them.
+    """
     logger.info("Starting database initialization...")
     db = None
     try:
         # Use context manager for database connection
         with DataBase() as db:
+            if drop_existing:
+                logger.warning("Drop existing tables requested. Proceeding to drop tables...")
+                # Drop tables in reverse order of potential dependencies if needed,
+                # but for simple tables like these, order doesn't strictly matter.
+                # Dropping in the order of config list is fine.
+                for config in TABLE_CONFIGS:
+                    table_name = config["table_name"]
+                    logger.info(f"Dropping table '{table_name}' if it exists...")
+                    try:
+                        db.execute_command(f"DROP TABLE IF EXISTS {table_name}")
+                        logger.info(f"Table '{table_name}' dropped (or did not exist).")
+                    except Exception as drop_e:
+                        logger.error(f"Failed to drop table '{table_name}': {drop_e}", exc_info=True)
+                        # Decide if you want to continue or stop on drop failure
+                        # For now, we log and continue to attempt creation
+                        pass # Continue to the next table or creation step
+
             for config in TABLE_CONFIGS:
                 model = config["model"]
                 table_name = config["table_name"]
@@ -81,7 +106,7 @@ def initialize_database():
                     table_name=table_name,
                     order_by=order_by,
                     engine=engine,
-                    if_not_exists=True # Use IF NOT EXISTS to avoid errors if table exists
+                    if_not_exists=True # Use IF NOT EXISTS to avoid errors if table exists (redundant if dropping, but safe)
                 )
                 logger.info(f"Table '{table_name}' creation process completed.")
 
@@ -92,4 +117,15 @@ def initialize_database():
         sys.exit(1) # Exit with a non-zero code on failure
 
 if __name__ == "__main__":
-    initialize_database()
+    parser = argparse.ArgumentParser(
+        description="Initialize the ClickHouse database by creating tables."
+    )
+    parser.add_argument(
+        "--drop",
+        action="store_true", # This makes it a boolean flag
+        help="Drop existing tables before creating them."
+    )
+
+    args = parser.parse_args()
+
+    initialize_database(drop_existing=args.drop)
