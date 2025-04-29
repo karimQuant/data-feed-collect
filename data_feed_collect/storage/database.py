@@ -235,7 +235,8 @@ class DataBase:
         # print(f"Executing CREATE TABLE query:\n{create_sql}") # Uncomment for debugging
 
         try:
-            self._client.execute(create_sql)
+            # Use the command method for DDL statements as recommended by clickhouse-connect docs
+            self._client.command(create_sql)
             print(f"Table '{table_name}' created successfully (or already exists).")
         except Exception as e:
             print(f"Error creating table '{table_name}': {e}")
