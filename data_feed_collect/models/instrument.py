@@ -8,7 +8,7 @@ class Instrument:
     symbol: str
     currency: str
     exchange: str
-    name: Optional[str] = None # Optional common name
+    name: str
 
 @dataclass(frozen=True)
 class Stock(Instrument):
