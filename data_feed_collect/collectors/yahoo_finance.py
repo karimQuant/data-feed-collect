@@ -12,10 +12,12 @@ import concurrent.futures # Import concurrent.futures for threading
 # from data_feed_collect.models.instrument import Instrument, Stock, Option
 # from data_feed_collect.models.ohlcv import OHLCV
 # from data_feed_collect.storage.database import DataBase
-from data_feed_collect.utils import limiter # Import the centralized limiter
+# Import limiter and the key from the utils package
+from data_feed_collect.utils import limiter, YAHOO_FINANCE_LIMIT_KEY
 
 # Define the key used for rate limiting Yahoo Finance requests
-YAHOO_FINANCE_LIMIT_KEY = 'yahoo_finance'
+# YAHOO_FINANCE_LIMIT_KEY is now imported from utils.limiter
+# YAHOO_FINANCE_LIMIT_KEY = 'yahoo_finance' # This line is no longer needed here
 
 # Assume table names based on test file summary
 INSTRUMENTS_TABLE_NAME = "instruments" # Assuming a general instruments table
