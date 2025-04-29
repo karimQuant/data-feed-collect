@@ -21,6 +21,8 @@ dependencies = [
     "clickhouse-connect>=0.7.0",
     "python-dotenv>=1.0.0",
     "pytest>=8.3.5",
+    "yfinance>=0.2.57",
+    "pyrate-limiter>=3.7.0",
 ]
 
 [project.optional-dependencies]
