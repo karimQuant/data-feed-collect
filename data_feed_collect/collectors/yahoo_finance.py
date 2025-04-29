@@ -3,9 +3,10 @@
 import yfinance as yf
 import pandas as pd
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple # Import Tuple
 from datetime import datetime, date
-import time # Import time for potential small delays if needed, though rate limiter handles primary waiting
+import time
+import concurrent.futures # Import concurrent.futures for threading
 
 # Assume these models and database class exist based on summaries
 # from data_feed_collect.models.instrument import Instrument, Stock, Option
@@ -92,19 +93,125 @@ class YahooFinanceOptionsChainCollector:
         # No specific initialization needed for yfinance itself
         pass
 
+    def _collect_single_ticker(self, ticker_symbol: str, collection_timestamp: datetime) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Collects options chain data for a single ticker.
+        This method is intended to be run in a separate thread.
+
+        Args:
+            ticker_symbol: The stock ticker symbol.
+            collection_timestamp: The timestamp for this collection run.
+
+        Returns:
+            A tuple containing two lists:
+            - List of dictionaries for option instruments.
+            - List of dictionaries for OHLCV snapshots.
+        """
+        option_instruments_data: List[Dict[str, Any]] = []
+        ohlcv_data: List[Dict[str, Any]] = []
+
+        self.logger.info(f"Collecting options chain for ticker: {ticker_symbol}")
+
+        try:
+            # Use the centralized rate limiter before making the request
+            with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
+                ticker = yf.Ticker(ticker_symbol)
+
+            # Get available expiration dates
+            with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
+                 expiration_dates = ticker.options
+
+            if not expiration_dates:
+                self.logger.info(f"No options found for {ticker_symbol}.")
+                return [], [] # Return empty lists
+
+            # Collect data for each expiration date
+            for date_str in expiration_dates:
+                self.logger.debug(f"  Fetching options for expiration: {date_str}")
+                try:
+                    # Parse the date string into a date object
+                    expiration_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+
+                    with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
+                        # Get option chain for the specific date
+                        option_chain = ticker.option_chain(date_str)
+
+                    # Process calls and puts
+                    calls_df = option_chain.calls
+                    puts_df = option_chain.puts
+
+                    # Combine and process
+                    combined_df = pd.concat([calls_df, puts_df], ignore_index=True)
+
+                    if combined_df.empty:
+                        self.logger.debug(f"No option contracts found for {ticker_symbol} on {date_str}.")
+                        continue
+
+                    # Process each option contract in the chain
+                    for index, row in combined_df.iterrows():
+                        try:
+                            # Generate unique instrument ID
+                            instrument_id = generate_option_instrument_id(
+                                underlying_ticker=ticker_symbol,
+                                expiration_date=expiration_date,
+                                strike=row['strike'],
+                                contract_type=row['contractType']
+                            )
+
+                            # Map data for Instrument table
+                            option_instrument_data = map_option_snapshot_to_instrument(
+                                instrument_id=instrument_id,
+                                underlying_ticker=ticker_symbol,
+                                expiration_date=expiration_date,
+                                snapshot_data=row.to_dict() # Pass row as dict
+                            )
+                            option_instruments_data.append(option_instrument_data)
+
+                            # Map data for OHLCV table (snapshot)
+                            # Only save OHLCV if lastPrice is available
+                            if pd.notna(row.get('lastPrice')):
+                                ohlcv_snapshot_data = map_option_snapshot_to_ohlcv(
+                                    instrument_id=instrument_id,
+                                    snapshot_data=row.to_dict(), # Pass row as dict
+                                    collection_timestamp=collection_timestamp
+                                )
+                                ohlcv_data.append(ohlcv_snapshot_data)
+                            else:
+                                 self.logger.debug(f"Skipping OHLCV for {instrument_id} due to missing lastPrice.")
+
+
+                        except Exception as e:
+                            self.logger.error(f"Error processing option contract for {ticker_symbol} on {date_str}: {e}")
+                            # Continue processing other contracts
+
+                except Exception as e:
+                    self.logger.error(f"Error fetching options for {ticker_symbol} on {date_str}: {e}")
+                    # Continue with the next expiration date
+
+        except Exception as e:
+            self.logger.error(f"An error occurred during Yahoo Options chain collection for {ticker_symbol}: {e}")
+            # Return whatever data was collected so far, or empty lists if error was early
+            return option_instruments_data, ohlcv_data
+
+        self.logger.info(f"Finished collecting data for {ticker_symbol}.")
+        return option_instruments_data, ohlcv_data
+
+
     def collect(self, config: Dict[str, Any], db: Any) -> None: # Use Any for db type hint to avoid circular dependency if DataBase not imported
         """
-        Collects options chain data for specified tickers and saves to DB.
+        Collects options chain data for specified tickers in parallel and saves to DB.
 
         Args:
             config: A dictionary containing the source configuration.
-                    Expected to have a 'tickers' key (list of strings)
-                    or 'fetch_tickers_from_db' (boolean).
+                    Expected to have:
+                    - 'tickers' key (list of strings) OR 'fetch_tickers_from_db' (boolean).
+                    - 'max_workers' (optional int, number of threads for parallel collection, default 5).
             db: An instance of the DataBase class.
         """
         tickers_to_collect: List[str] = []
         fetch_from_db = config.get("fetch_tickers_from_db", False)
         configured_tickers = config.get("tickers", [])
+        max_workers = config.get("max_workers", 5) # Get max_workers from config, default to 5
 
         if fetch_from_db:
             self.logger.info("Fetching stock tickers from the database...")
@@ -150,95 +257,47 @@ class YahooFinanceOptionsChainCollector:
         # This requires access to the model dataclasses and DataBase.create_table
         # try:
         #     # Assuming DataBase.create_table takes dataclass type and table name
-        #     db.create_table(Option, INSTRUMENTS_TABLE_NAME, if_not_exists=True)
-        #     db.create_table(OHLCV, OHLCV_TABLE_NAME, if_not_exists=True)
-        #     self.logger.info("Ensured Instrument and OHLCV tables exist.")
+        #     # from data_feed_collect.models.instrument import Option # Need to import if using dataclass
+        #     # from data_feed_collect.models.ohlcv import OHLCV # Need to import if using dataclass
+        #     # db.create_table(Option, INSTRUMENTS_TABLE_NAME, if_not_exists=True)
+        #     # db.create_table(OHLCV, OHLCV_TABLE_NAME, if_not_exists=True)
+        #     # self.logger.info("Ensured Instrument and OHLCV tables exist.")
         # except Exception as e:
         #      self.logger.error(f"Failed to ensure tables exist: {e}")
         #      # Decide if this is a fatal error or just log and continue
 
-        for ticker_symbol in tickers_to_collect:
-            self.logger.info(f"Collecting options chain for ticker: {ticker_symbol}")
 
-            try:
-                # Use the centralized rate limiter before making the request
-                with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                    ticker = yf.Ticker(ticker_symbol)
+        self.logger.info(f"Starting parallel collection for {len(tickers_to_collect)} tickers with {max_workers} workers.")
 
-                # Get available expiration dates
-                with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                     expiration_dates = ticker.options
+        # Use ThreadPoolExecutor for parallel collection
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit tasks for each ticker
+            future_to_ticker = {
+                executor.submit(self._collect_single_ticker, ticker_symbol, collection_timestamp): ticker_symbol
+                for ticker_symbol in tickers_to_collect
+            }
 
-                if not expiration_dates:
-                    self.logger.info(f"No options found for {ticker_symbol}.")
-                    continue # Move to the next ticker
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker_symbol = future_to_ticker[future]
+                try:
+                    # Get the result from the completed future
+                    option_instruments, ohlcv_snapshots = future.result()
 
-                # Collect data for each expiration date
-                for date_str in expiration_dates:
-                    self.logger.debug(f"  Fetching options for expiration: {date_str}")
-                    try:
-                        # Parse the date string into a date object
-                        expiration_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    # Extend the main lists with data from this ticker
+                    all_option_instruments_data.extend(option_instruments)
+                    all_ohlcv_data.extend(ohlcv_snapshots)
 
-                        with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                            # Get option chain for the specific date
-                            option_chain = ticker.option_chain(date_str)
+                    self.logger.info(f"Successfully collected data for {ticker_symbol}. Instruments: {len(option_instruments)}, OHLCV: {len(ohlcv_snapshots)}")
 
-                        # Process calls and puts
-                        calls_df = option_chain.calls
-                        puts_df = option_chain.puts
+                except Exception as exc:
+                    # Log any exceptions that occurred in the worker thread
+                    self.logger.error(f"Ticker {ticker_symbol} generated an exception: {exc}")
 
-                        # Combine and process
-                        combined_df = pd.concat([calls_df, puts_df], ignore_index=True)
+        self.logger.info("Parallel collection finished.")
+        self.logger.info(f"Total instruments collected: {len(all_option_instruments_data)}")
+        self.logger.info(f"Total OHLCV snapshots collected: {len(all_ohlcv_data)}")
 
-                        if combined_df.empty:
-                            self.logger.debug(f"No option contracts found for {ticker_symbol} on {date_str}.")
-                            continue
-
-                        # Process each option contract in the chain
-                        for index, row in combined_df.iterrows():
-                            try:
-                                # Generate unique instrument ID
-                                instrument_id = generate_option_instrument_id(
-                                    underlying_ticker=ticker_symbol,
-                                    expiration_date=expiration_date,
-                                    strike=row['strike'],
-                                    contract_type=row['contractType']
-                                )
-
-                                # Map data for Instrument table
-                                option_instrument_data = map_option_snapshot_to_instrument(
-                                    instrument_id=instrument_id,
-                                    underlying_ticker=ticker_symbol,
-                                    expiration_date=expiration_date,
-                                    snapshot_data=row.to_dict() # Pass row as dict
-                                )
-                                all_option_instruments_data.append(option_instrument_data)
-
-                                # Map data for OHLCV table (snapshot)
-                                # Only save OHLCV if lastPrice is available
-                                if pd.notna(row.get('lastPrice')):
-                                    ohlcv_data = map_option_snapshot_to_ohlcv(
-                                        instrument_id=instrument_id,
-                                        snapshot_data=row.to_dict(), # Pass row as dict
-                                        collection_timestamp=collection_timestamp
-                                    )
-                                    all_ohlcv_data.append(ohlcv_data)
-                                else:
-                                     self.logger.debug(f"Skipping OHLCV for {instrument_id} due to missing lastPrice.")
-
-
-                            except Exception as e:
-                                self.logger.error(f"Error processing option contract for {ticker_symbol} on {date_str}: {e}")
-                                # Continue processing other contracts
-
-                    except Exception as e:
-                        self.logger.error(f"Error fetching options for {ticker_symbol} on {date_str}: {e}")
-                        # Continue with the next expiration date
-
-            except Exception as e:
-                self.logger.error(f"An error occurred during Yahoo Options chain collection for {ticker_symbol}: {e}")
-                # Continue with the next ticker
 
         # --- Save collected data to the database ---
         if all_option_instruments_data:
@@ -291,10 +350,10 @@ if __name__ == '__main__':
         db_conn = DataBase()
 
         # Example config: fetch tickers from DB
-        config = {"fetch_tickers_from_db": True}
+        # config = {"fetch_tickers_from_db": True, "max_workers": 8}
 
         # Example config: specify tickers directly
-        # config = {"tickers": ["AAPL", "MSFT"]}
+        config = {"tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"], "max_workers": 8}
 
         collector = YahooFinanceOptionsChainCollector()
         collector.collect(config, db_conn)
@@ -305,4 +364,3 @@ if __name__ == '__main__':
         if 'db_conn' in locals() and db_conn:
             db_conn.close()
             logging.info("Database connection closed.")
-
