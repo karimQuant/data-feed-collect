@@ -360,7 +360,7 @@ if __name__ == '__main__':
         # config = {"fetch_tickers_from_db": True, "max_workers": 8}
 
         # Example config: specify tickers directly
-        config = {"tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"], "max_workers": 8}
+        config = {"tickers": ["AAPL"], "max_workers": 1}
 
         collector = YahooFinanceOptionsChainCollector()
         collector.collect(config, db_conn)
