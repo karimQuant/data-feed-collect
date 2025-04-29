@@ -5,6 +5,7 @@ from typing import Optional
 @dataclass(frozen=True)
 class Instrument:
     """Base dataclass for financial instruments."""
+    id: str # Added unique identifier for the instrument
     symbol: str
     currency: str
     exchange: str
@@ -13,13 +14,13 @@ class Instrument:
 @dataclass(frozen=True)
 class Stock(Instrument):
     """Dataclass for a Stock instrument."""
-    # Inherits symbol, currency, exchange, name
+    # Inherits id, symbol, currency, exchange, name
     pass # Add stock-specific fields here if needed later
 
 @dataclass(frozen=True)
 class Option(Instrument):
     """Dataclass for an Option instrument."""
-    # Inherits symbol (underlying symbol), currency, exchange, name
+    # Inherits id, symbol (underlying symbol), currency, exchange, name
     expiration_date: date
     option_type: str  # 'call' or 'put'
     strike_price: float
