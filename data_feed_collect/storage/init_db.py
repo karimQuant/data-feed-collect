@@ -114,7 +114,7 @@ def initialize_database(drop_existing: bool = False):
 
     except Exception as e:
         logger.error(f"Database initialization failed: {e}", exc_info=True)
-        sys.exit(1) # Exit with a non-zero code on failure
+        raise e
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
