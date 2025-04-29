@@ -117,15 +117,15 @@ class YahooFinanceOptionsChainCollector:
 
         try:
             # Use the centralized rate limiter before making the request
-            # The key identifies the item being rate-limited.
-            # delay=True means it will wait if the limit is reached.
-            with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                ticker = yf.Ticker(ticker_symbol)
+            # Call try_acquire directly. Since the limiter is configured with
+            # max_delay and raise_when_fail=False, it will wait if needed.
+            limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
+            ticker = yf.Ticker(ticker_symbol)
 
             # Get available expiration dates
             # Apply rate limit again for the next API call
-            with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                 expiration_dates = ticker.options
+            limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
+            expiration_dates = ticker.options
 
             if not expiration_dates:
                 self.logger.info(f"No options found for {ticker_symbol}.")
@@ -139,9 +139,9 @@ class YahooFinanceOptionsChainCollector:
                     expiration_date = datetime.strptime(date_str, '%Y-%m-%d').date()
 
                     # Apply rate limit again for fetching option chain for a specific date
-                    with limiter.ratelimit(YAHOO_FINANCE_LIMIT_KEY, delay=True):
-                        # Get option chain for the specific date
-                        option_chain = ticker.option_chain(date_str)
+                    limiter.try_acquire(YAHOO_FINANCE_LIMIT_KEY)
+                    # Get option chain for the specific date
+                    option_chain = ticker.option_chain(date_str)
 
                     # Process calls and puts
                     calls_df = option_chain.calls
