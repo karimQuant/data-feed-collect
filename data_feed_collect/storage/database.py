@@ -127,8 +127,10 @@ class DataBase:
                 # This argument is removed as it's not supported in newer clickhouse-connect versions
                 # session_id_generator=None
             )
-            # Test connection
-            self.client.command('SELECT 1')
+            # Test connection is implicitly done by get_client.
+            # If get_client succeeds, self.client is set.
+            # If it fails, an exception is raised and caught below.
+            # Removed explicit SELECT 1 command as get_client is sufficient.
             self.logger.info(f"Connected to ClickHouse database '{self.database}' at {self.host}:{self.port}")
         except Exception as e:
             self.logger.error(f"Failed to connect to ClickHouse: {e}")
@@ -152,25 +154,37 @@ class DataBase:
         try:
             self.logger.debug(f"Executing query: {query}")
             result = self.client.query(query)
-            return result.result_df
+            # Ensure the result object has the result_df attribute before accessing
+            if hasattr(result, 'result_df'):
+                 return result.result_df
+            else:
+                 self.logger.error(f"Query result object does not have 'result_df' attribute. Query: {query}")
+                 return pd.DataFrame() # Return empty DataFrame if unexpected result
         except Exception as e:
             self.logger.error(f"Error executing query: {e}\nQuery: {query}")
             return pd.DataFrame() # Return empty DataFrame on error
 
-    def execute_command(self, command: str):
+    def execute_command(self, command: str) -> Any:
          """
-         Executes a command (e.g., CREATE TABLE, INSERT, ALTER).
+         Executes a command (e.g., CREATE TABLE, INSERT, ALTER, EXISTS).
 
          Args:
              command: The SQL command string.
+
+         Returns:
+             The result of the command execution, which varies depending on the command.
+             For EXISTS, it's typically 0 or 1. For others, it might be None or a count.
          """
          if not self.client:
              self.logger.error("Cannot execute command: Database client is not connected.")
-             return
+             # Returning None here aligns with the observed test failure,
+             # indicating the client was None.
+             return None
          try:
              self.logger.debug(f"Executing command: {command}")
-             self.client.command(command)
+             result = self.client.command(command)
              self.logger.debug("Command executed successfully.")
+             return result # Return the result of the command
          except Exception as e:
              self.logger.error(f"Error executing command: {e}\nCommand: {command}")
              raise # Re-raise the exception
@@ -265,6 +279,7 @@ class DataBase:
 
         self.logger.info(f"Attempting to create table '{table_name}'...")
         try:
+            # Use execute_command to run the CREATE TABLE statement
             self.execute_command(create_table_sql)
             self.logger.info(f"Table '{table_name}' created or already exists.")
         except Exception as e:
