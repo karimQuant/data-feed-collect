@@ -76,7 +76,7 @@ class YahooFinanceOptionsChainCollector:
         instrument_id: str,
         snapshot_data: Dict[str, Any],
         collection_timestamp: datetime,
-        # underlying_ticker: str, # Not directly used in mapping to OptionChain fields
+        underlying_ticker: str, # Uncommented and added to signature
         # expiration_date: date # Not directly used in mapping to OptionChain fields
     ) -> Dict[str, Any]:
         """Maps a single option contract snapshot to an OptionChain dictionary."""
@@ -85,6 +85,7 @@ class YahooFinanceOptionsChainCollector:
         mapped_data = {
             "instrument_id": instrument_id,
             "timestamp": collection_timestamp,
+            "underlying_symbol": underlying_ticker.upper(), # Add underlying_symbol here
             "contractSymbol": snapshot_data.get('contractSymbol'),
             # yfinance lastTradeDate can be a timestamp, convert to datetime if needed
             # Assuming it's already a datetime or convertible by pandas/clickhouse-connect
@@ -201,7 +202,7 @@ class YahooFinanceOptionsChainCollector:
                                 instrument_id=instrument_id,
                                 snapshot_data=row.to_dict(), # Pass row as dict
                                 collection_timestamp=collection_timestamp,
-                                # underlying_ticker=ticker_symbol, # Not needed by mapping function
+                                underlying_ticker=ticker_symbol, # Pass the underlying ticker
                                 # expiration_date=expiration_date # Not needed by mapping function
                             )
                             option_chains_data.append(option_chain_snapshot_data)

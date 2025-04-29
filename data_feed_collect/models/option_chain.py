@@ -13,6 +13,9 @@ class OptionChain:
     # timestamp is when this specific snapshot was collected
     timestamp: datetime
 
+    # Add the underlying symbol
+    underlying_symbol: str
+
     # Fields directly from yfinance option chain DataFrame
     contractSymbol: str
     # lastTradeDate can be NaN/NaT, so it's Optional
