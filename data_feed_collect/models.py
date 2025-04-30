@@ -30,8 +30,8 @@ class YFinanceOption(Base):
     bid = Column(Float) # Can be None
     ask = Column[Float](Float) # Corrected type hint
     contractSize = Column(String, nullable=False) # e.g., 'REGULAR'
-    expiration = Column(Integer, nullable=False) # Unix timestamp of expiration date
-    lastTradeDate = Column(Integer) # Unix timestamp of last trade date, can be None
+    expiration = Column(DateTime, nullable=False) # Unix timestamp of expiration date
+    lastTradeDate = Column(DateTime) # Unix timestamp of last trade date, can be None
     impliedVolatility = Column[Float](Float) # Corrected type hint
     inTheMoney = Column(Boolean, nullable=False)
     optionType = Column(String, nullable=False) # 'call' or 'put'
