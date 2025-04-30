@@ -1,4 +1,5 @@
-import asyncio
+import threading # Although not directly used for execution, good to import if thinking about threads
+import concurrent.futures # For ThreadPoolExecutor
 import yfinance as yf
 from pyrate_limiter import Limiter, Rate, Duration
 from sqlalchemy.orm import Session
@@ -6,29 +7,31 @@ from data_feed_collect.models import YFinanceOption
 from data_feed_collect.database import get_db
 import pandas as pd
 from typing import List
+from datetime import datetime # Added for potential collected_at timestamp
 
 # Define the global rate limiter
 # Example: Allow up to 10 calls per minute. Adjust as needed based on yfinance limits.
 # Note: yfinance limits are not officially documented and can change.
+# The Limiter class is thread-safe when used with 'with limiter:'
 limiter = Limiter(Rate(10, Duration.MINUTE))
 
-async def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
+def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     Fetches option chain for a specific date for a yfinance Ticker object,
-    applying rate limiting and running the synchronous call in a thread.
+    applying rate limiting. This function is designed to be run in a thread.
     """
     # Apply rate limiting before making the call
-    async with limiter:
-        # Run the synchronous yfinance call in a separate thread to avoid blocking the event loop
+    with limiter:
         print(f"Fetching data for {ticker_obj.ticker} on {date}...")
         try:
-            option_chain_data = await asyncio.to_thread(ticker_obj.option_chain, date)
+            # yfinance calls are synchronous, no need for asyncio.to_thread here
+            option_chain_data = ticker_obj.option_chain(date)
             print(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
-            return option_chain_data
+            return date, option_chain_data # Return date along with data to identify result
         except Exception as e:
             print(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
             # Return None or raise the exception, depending on desired error handling
-            return None
+            return date, None # Return date even on error
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -38,6 +41,8 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
     """
     options = []
     if df is not None and not df.empty:
+        # Add a timestamp for when the data was collected
+        collected_at = datetime.utcnow()
         for _, row in df.iterrows():
             try:
                 # Map DataFrame columns to YFinanceOption model attributes
@@ -59,11 +64,11 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                     contract_size=row.get('contractSize'), # Assuming string or similar
                     currency=row.get('currency'), # Assuming string
                     # Handle date conversion if necessary. yfinance often returns datetime objects.
-                    last_trade_date=row.get('lastTradeDate'),
+                    # Ensure lastTradeDate is converted to a standard Python datetime if needed by SQLAlchemy model
+                    last_trade_date=row.get('lastTradeDate'), # Assuming this is already a datetime or compatible
                     change=float(row.get('change')) if pd.notna(row.get('change')) else None,
                     percent_change=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None,
-                    # Add a timestamp for when the data was collected? (Optional but good practice)
-                    # collected_at=datetime.utcnow()
+                    collected_at=collected_at # Add the collection timestamp
                 )
                 options.append(option)
             except Exception as e:
@@ -72,21 +77,21 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 continue
     return options
 
-async def collect_option_chain(ticker_symbol: str):
+def collect_option_chain(ticker_symbol: str):
     """
     Collects option chain data for a given ticker across all expiration dates,
     saves the data to the database.
 
-    Uses asyncio for parallel fetching and pyrate-limiter for rate limiting.
+    Uses threading for parallel fetching and pyrate-limiter for rate limiting.
     """
     print(f"Starting option chain collection for {ticker_symbol}...")
     ticker_obj = yf.Ticker(ticker_symbol)
 
-    # Fetch expiration dates. This call might also benefit from rate limiting
-    # if called frequently, but for a single ticker run, it's usually fine.
+    # Fetch expiration dates. This call is synchronous.
     try:
-        # Running this in a thread just in case it makes a network call
-        expiration_dates = await asyncio.to_thread(lambda: ticker_obj.options)
+        # Apply rate limiting to the initial options call as well
+        with limiter:
+             expiration_dates = ticker_obj.options
         if not expiration_dates:
             print(f"No expiration dates found for {ticker_symbol}. Skipping.")
             return
@@ -95,34 +100,36 @@ async def collect_option_chain(ticker_symbol: str):
         print(f"Error fetching expiration dates for {ticker_symbol}: {e}")
         return
 
-    # Create a list of coroutines, one for fetching data for each expiration date
-    fetch_tasks = [fetch_option_chain_for_date(ticker_obj, date) for date in expiration_dates]
-
-    # Run the fetch tasks concurrently
-    # return_exceptions=True allows other tasks to complete even if one fails
-    results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-
     all_options_to_save: List[YFinanceOption] = []
 
-    # Process the results from the parallel fetches
-    for i, result in enumerate(results):
-        date = expiration_dates[i]
-        if isinstance(result, Exception):
-            # Error was already printed in fetch_option_chain_for_date
-            continue
-        if result is None:
-             # Fetch failed and returned None
-             continue
+    # Use ThreadPoolExecutor to fetch data for different expiration dates in parallel
+    # Max workers can be adjusted based on system resources and desired concurrency
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit tasks to the executor
+        future_to_date = {executor.submit(fetch_option_chain_for_date, ticker_obj, date): date for date in expiration_dates}
 
-        # result is the option chain data object from yfinance
-        option_chain_data = result
+        # Process results as they complete
+        for future in concurrent.futures.as_completed(future_to_date):
+            date = future_to_date[future]
+            try:
+                # Get the result from the future (this will raise exceptions if the task failed)
+                # The result is a tuple: (date, option_chain_data or None)
+                fetched_date, option_chain_data = future.result()
 
-        # Transform calls and puts dataframes into model instances
-        calls_options = transform_option_data(ticker_symbol, date, option_chain_data.calls, 'call')
-        puts_options = transform_option_data(ticker_symbol, date, option_chain_data.puts, 'put')
+                if option_chain_data is None:
+                    # Error was already printed in fetch_option_chain_for_date
+                    continue
 
-        all_options_to_save.extend(calls_options)
-        all_options_to_save.extend(puts_options)
+                # Transform calls and puts dataframes into model instances
+                calls_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.calls, 'call')
+                puts_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.puts, 'put')
+
+                all_options_to_save.extend(calls_options)
+                all_options_to_save.extend(puts_options)
+
+            except Exception as e:
+                print(f"Error processing result for {ticker_symbol} on {date}: {e}")
+                # Continue processing other results even if one fails
 
     print(f"Finished fetching and transforming data for {ticker_symbol}. Collected {len(all_options_to_save)} option contracts.")
 
@@ -148,17 +155,17 @@ async def collect_option_chain(ticker_symbol: str):
         print(f"No option contracts to save for {ticker_symbol}.")
 
 # Example of how you might run this function (e.g., in a main script or another module)
-# import asyncio
-# from data_feed_collect.models import init_schema
-# from data_feed_collect.database import get_engine
+# import asyncio # No longer needed for this version
+from data_feed_collect.models import init_schema
+from data_feed_collect.database import get_engine
 
-async def main():
+def main():
     # Ensure schema is initialized before running collectors
     # engine = get_engine()
     # init_schema(engine) # Run this once when setting up the database
 
-    await collect_option_chain("AAPL")
-    await collect_option_chain("MSFT") # Example for another ticker
+    collect_option_chain("AAPL")
+    collect_option_chain("MSFT") # Example for another ticker
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main() # Call the synchronous main function
