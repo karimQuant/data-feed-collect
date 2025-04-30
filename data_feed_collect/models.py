@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime, Text # Import Text for potentially long descriptions
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 from data_feed_collect.database import get_engine # Import get_engine
@@ -45,6 +45,27 @@ class YFinanceOption(Base):
                 f"data_collected_timestamp='{self.data_collected_timestamp.isoformat()}', "
                 f"strike={self.strike}, optionType='{self.optionType}')>")
 
+class StocksCollection(Base):
+    """
+    SQLAlchemy model for storing basic stock information like ticker and description.
+    """
+    __tablename__ = 'stocks_collection'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String, unique=True, index=True, nullable=False) # Ticker symbol, should be unique
+    company_description = Column(Text) # Use Text for potentially long descriptions
+
+    __table_args__ = (
+        {'comment': 'Basic Stock Information'},
+    )
+
+    def __repr__(self):
+        # Truncate description for repr to keep it readable
+        desc_preview = self.company_description[:50] + '...' if self.company_description and len(self.company_description) > 50 else self.company_description
+        return (f"<StocksCollection(ticker='{self.ticker}', "
+                f"company_description='{desc_preview}')>")
+
+
 def init_schema(engine):
     """
     Creates the database tables defined in the models if they do not exist.
@@ -53,7 +74,7 @@ def init_schema(engine):
         engine: SQLAlchemy engine instance.
     """
     print("Initializing database schema...")
-    # Base.metadata.create_all will now use the __table_args__ with the engine instance
+    # Base.metadata.create_all will now create tables for all models inheriting from Base
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
