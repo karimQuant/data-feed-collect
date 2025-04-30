@@ -111,21 +111,21 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                     optionType=option_type,
                     contractSymbol=row.get('contractSymbol'),
                     strike=float(row.get('strike')) if pd.notna(row.get('strike')) else None,
-                    last_price=float(row.get('lastPrice')) if pd.notna(row.get('lastPrice')) else None,
+                    lastPrice=float(row.get('lastPrice')) if pd.notna(row.get('lastPrice')) else None, # Corrected attribute name
                     bid=float(row.get('bid')) if pd.notna(row.get('bid')) else None,
                     ask=float(row.get('ask')) if pd.notna(row.get('ask')) else None,
                     volume=int(row.get('volume')) if pd.notna(row.get('volume')) else None,
-                    open_interest=int(row.get('openInterest')) if pd.notna(row.get('openInterest')) else None,
-                    implied_volatility=float(row.get('impliedVolatility')) if pd.notna(row.get('impliedVolatility')) else None,
-                    in_the_money=bool(row.get('inTheMoney')) if pd.notna(row.get('inTheMoney')) else None,
-                    contract_size=row.get('contractSize'), # Assuming string or similar
+                    openInterest=int(row.get('openInterest')) if pd.notna(row.get('openInterest')) else None, # Corrected attribute name
+                    impliedVolatility=float(row.get('impliedVolatility')) if pd.notna(row.get('impliedVolatility')) else None, # Corrected attribute name
+                    inTheMoney=bool(row.get('inTheMoney')) if pd.notna(row.get('inTheMoney')) else None, # Corrected attribute name
+                    contractSize=row.get('contractSize'), # Corrected attribute name
                     currency=row.get('currency'), # Assuming string
                     # Handle date conversion if necessary. yfinance often returns datetime objects.
                     # Ensure lastTradeDate is converted to a standard Python datetime if needed by SQLAlchemy model
-                    last_trade_date=row.get('lastTradeDate'), # Assuming this is already a datetime or compatible
+                    lastTradeDate=row.get('lastTradeDate'), # Corrected attribute name
                     change=float(row.get('change')) if pd.notna(row.get('change')) else None,
-                    percent_change=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None,
-                    collected_at=collected_at # Add the collection timestamp
+                    percentChange=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None, # Corrected attribute name
+                    data_collected_timestamp=collected_at # Corrected attribute name
                 )
                 options.append(option)
             except Exception as e:
@@ -231,7 +231,7 @@ from data_feed_collect.database import get_engine
 
 def main():
     # Setup logging first
-    setup_logging()    
+    setup_logging()
     collect_option_chain("AAPL")
     collect_option_chain("MSFT") # Example for another ticker
 
