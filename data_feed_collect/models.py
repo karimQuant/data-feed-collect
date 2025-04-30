@@ -27,7 +27,7 @@ class YFinanceOption(Base):
     volume = Column(Integer) # Can be None
     openInterest = Column(Integer) # Can be None
     bid = Column(Float) # Can be None
-    ask = Column(Float) # Can be None
+    ask = Column[Float](Float) # Corrected type hint
     contractSize = Column(String, nullable=False) # e.g., 'REGULAR'
     expiration = Column(Integer, nullable=False) # Unix timestamp of expiration date
     lastTradeDate = Column(Integer) # Unix timestamp of last trade date, can be None
@@ -39,10 +39,10 @@ class YFinanceOption(Base):
     # This tells the clickhouse-sqlalchemy dialect how to create the table
     __table_args__ = (
         # Define the ClickHouse Engine and Order By clause
-        # 'clickhouse_engine' and 'clickhouse_order_by' are dialect-specific keys
+        # Use standard SQLAlchemy argument names 'engine' and 'order_by'
         {
-            'clickhouse_engine': 'MergeTree()',
-            'clickhouse_order_by': '(ticker, contractSymbol, data_collected_timestamp)'
+            'engine': 'MergeTree()', # Changed from 'clickhouse_engine'
+            'order_by': '(ticker, contractSymbol, data_collected_timestamp)' # Changed from 'clickhouse_order_by'
         }
     )
 
@@ -60,7 +60,7 @@ def init_schema(engine):
         engine: SQLAlchemy engine instance.
     """
     print("Initializing database schema...")
-    # Base.metadata.create_all will now use the __table_args__ when compiling for ClickHouse
+    # Base.metadata.create_all will now use the __table_args__ with correct keys
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
