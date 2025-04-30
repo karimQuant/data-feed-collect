@@ -1,38 +1,88 @@
-import threading # Although not directly used for execution, good to import if thinking about threads
-import concurrent.futures # For ThreadPoolExecutor
+import threading
+import concurrent.futures
 import yfinance as yf
-from pyrate_limiter import Limiter, Rate, Duration
+from pyrate_limiter import Limiter, Rate, Duration, BucketFactory, AbstractBucket, RateItem, InMemoryBucket
 from sqlalchemy.orm import Session
 from data_feed_collect.models import YFinanceOption
 from data_feed_collect.database import get_db
 import pandas as pd
-from typing import List
-from datetime import datetime # Added for potential collected_at timestamp
+from typing import List, Optional
+from datetime import datetime
+import time # Needed for TimeClock
 
-# Define the global rate limiter
+# Define the rate limits
 # Example: Allow up to 50 calls per minute. Adjust as needed based on yfinance limits.
 # Note: yfinance limits are not officially documented and can change.
-# The Limiter class is thread-safe when used with 'limiter.block()'
-limiter = Limiter(Rate(50, Duration.MINUTE))
+# We'll use a single rate for simplicity, applied globally across all tickers/calls.
+rate = Rate(50, Duration.MINUTE)
+rates = [rate]
+
+# Define a simple BucketFactory that uses a single InMemoryBucket
+# This aligns with the documentation's structure for using a Limiter with a factory.
+class SingleBucketFactory(BucketFactory):
+    def __init__(self, rates: List[Rate]):
+        # Create a single InMemoryBucket instance with the defined rates
+        self._bucket = InMemoryBucket(rates)
+        # Use the default TimeClock (which uses time.time())
+        self._clock = time
+
+        # The Limiter instance is responsible for calling schedule_leak on the factory's buckets.
+        # We don't need to call schedule_leak manually here.
+
+    def wrap_item(self, name: str, weight: int = 1) -> RateItem:
+        """Time-stamping item, return a RateItem"""
+        # Use the factory's clock to get the current timestamp
+        now = self._clock.time()
+        return RateItem(name, now, weight=weight)
+
+    def get(self, _item: RateItem) -> AbstractBucket:
+        """Route all items to the single bucket"""
+        # For this simple case, all items go to the same bucket
+        return self._bucket
+
+# Instantiate the BucketFactory with the defined rates
+bucket_factory = SingleBucketFactory(rates)
+
+# Instantiate the Limiter with the BucketFactory
+# Set max_delay to float('inf') to make try_acquire block indefinitely if the rate limit is hit.
+# This replicates the blocking behavior of the previous limiter.block() usage.
+# raise_when_fail=True (default) means it will raise LimiterDelayException if the required
+# wait time exceeds max_delay. With max_delay=inf, this exception will not be raised.
+limiter = Limiter(bucket_factory, max_delay=float('inf'))
+
+# Define a constant item name for the global rate limit
+# Using a constant name ensures all calls contribute to the same bucket/rate limit.
+GLOBAL_YFINANCE_ITEM_NAME = "yfinance_api_call"
+
 
 def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     Fetches option chain for a specific date for a yfinance Ticker object,
     applying rate limiting. This function is designed to be run in a thread.
     """
+    ticker_symbol = ticker_obj.ticker # Get ticker symbol for logging
+
     # Apply rate limiting before making the call
-    # Use limiter.block() for synchronous blocking
-    limiter.block()
+    # Use try_acquire with the constant item name for the global limit.
+    # Since max_delay is set to inf on the limiter, this will block if necessary.
+    try:
+        limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
+    except Exception as e:
+        # This catch is mostly for unexpected errors from try_acquire,
+        # as max_delay=inf should prevent LimiterDelayException.
+        print(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
+        return date, None # Treat rate limit error as a fetch failure
+
     print(f"Fetching data for {ticker_obj.ticker} on {date}...")
     try:
-        # yfinance calls are synchronous, no need for asyncio.to_thread here
+        # yfinance calls are synchronous
         option_chain_data = ticker_obj.option_chain(date)
         print(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
         return date, option_chain_data # Return date along with data to identify result
     except Exception as e:
         print(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
-        # Return None or raise the exception, depending on desired error handling
-        return date, None # Return date even on error
+        # Return date even on error
+        return date, None
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -91,14 +141,16 @@ def collect_option_chain(ticker_symbol: str):
     # Fetch expiration dates. This call is synchronous.
     try:
         # Apply rate limiting to the initial options call as well
-        # Use limiter.block() for synchronous blocking
-        limiter.block()
+        # Use try_acquire with the constant item name for the global limit.
+        # Since max_delay is set to inf on the limiter, this will block if necessary.
+        limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
         expiration_dates = ticker_obj.options
         if not expiration_dates:
             print(f"No expiration dates found for {ticker_symbol}. Skipping.")
             return
         print(f"Found {len(expiration_dates)} expiration dates for {ticker_symbol}.")
     except Exception as e:
+        # Catch potential errors from try_acquire or ticker_obj.options
         print(f"Error fetching expiration dates for {ticker_symbol}: {e}")
         return
 
