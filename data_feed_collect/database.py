@@ -10,34 +10,34 @@ load_dotenv()
 # Get the database URL from environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# If DATABASE_URL is not set, try to construct it from individual ClickHouse variables
+# If DATABASE_URL is not set, try to construct it from individual PostgreSQL variables
 if not DATABASE_URL:
-    ch_host = os.getenv("POSTGRES_HOST")
-    ch_port = os.getenv("POSTGRES_PORT")
-    ch_database = os.getenv("POSTGRES_DATABASE")
-    ch_user = os.getenv("POSTGRES_USER")
-    ch_password = os.getenv("POSTGRES_PASSWORD")
+    pg_host = os.getenv("POSTGRES_HOST")
+    pg_port = os.getenv("POSTGRES_PORT")
+    pg_database = os.getenv("POSTGRES_DATABASE")
+    pg_user = os.getenv("POSTGRES_USER")
+    pg_password = os.getenv("POSTGRES_PASSWORD")
 
     # Check if required PostgreSQL variables are set for construction
-    if ch_host and ch_port and ch_database:
+    if pg_host and pg_port and pg_database:
         # Construct the PostgreSQL URL
-        # Format: clickhouse://user:password@host:port/database
-        # Note: Requires the 'clickhouse-sqlalchemy' driver
+        # Format: postgresql://user:password@host:port/database
+        # Note: Requires the 'psycopg2' or 'pg8000' driver (or similar)
         auth_part = ""
-        if ch_user:
-            auth_part = ch_user
-            if ch_password:
+        if pg_user:
+            auth_part = pg_user
+            if pg_password:
                 # URL encode the password in case it contains special characters
-                auth_part += f":{quote_plus(ch_password)}"
+                auth_part += f":{quote_plus(pg_password)}"
             auth_part += "@"
 
-        DATABASE_URL = f"clickhouse://{auth_part}{ch_host}:{ch_port}/{ch_database}"
-        print(f"Constructed DATABASE_URL from ClickHouse variables: {DATABASE_URL}")
+        DATABASE_URL = f"postgresql://{auth_part}{pg_host}:{pg_port}/{pg_database}"
+        print(f"Constructed DATABASE_URL from PostgreSQL variables: {DATABASE_URL}")
     else:
-        # If DATABASE_URL is not set and ClickHouse variables are insufficient
+        # If DATABASE_URL is not set and PostgreSQL variables are insufficient
         raise ValueError(
             "DATABASE_URL environment variable not set, "
-            "and insufficient CLICKHOUSE_ variables (CLICKHOUSE_HOST, CLICKHOUSE_PORT, CLICKHOUSE_DATABASE) "
+            "and insufficient POSTGRES_ variables (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE) "
             "to construct the URL."
         )
 
@@ -48,7 +48,7 @@ if not DATABASE_URL:
 
 # Create the SQLAlchemy engine
 # echo=True will log SQL statements (useful for debugging)
-# Note: For ClickHouse, you might need specific connection arguments depending on the driver
+# Note: For PostgreSQL, ensure you have a compatible driver installed (e.g., psycopg2)
 engine = create_engine(DATABASE_URL, echo=False)
 
 # Create a configured "Session" class
