@@ -49,43 +49,4 @@ def init_schema(engine):
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
-# Example usage (optional, for testing purposes)
-# if __name__ == '__main__':
-#     # Replace with your actual database URL
-#     # For a simple test, you can use an in-memory SQLite database
-#     DATABASE_URL = "sqlite:///:memory:"
-#     engine = create_engine(DATABASE_URL)
-#
-#     # Initialize the schema (create tables)
-#     init_schema(engine)
-#
-#     # You can now use the engine and session to interact with the database
-#     # from sqlalchemy.orm import sessionmaker
-#     # SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-#     # db = SessionLocal()
-#     #
-#     # # Example: Add a dummy option record
-#     # dummy_option = YFinanceOption(
-#     #     contractSymbol="AAPL240719C00150000",
-#     #     ticker="AAPL",
-#     #     data_collected_timestamp=datetime.utcnow(),
-#     #     strike=150.0,
-#     #     currency="USD",
-#     #     lastPrice=10.0,
-#     #     change=0.5,
-#     #     percentChange=5.0,
-#     #     volume=100,
-#     #     openInterest=500,
-#     #     bid=9.8,
-#     #     ask=10.2,
-#     #     contractSize="REGULAR",
-#     #     expiration=1626652800, # Example timestamp
-#     #     lastTradeDate=1626566400, # Example timestamp
-#     #     impliedVolatility=0.25,
-#     #     inTheMoney=True,
-#     #     optionType="call"
-#     # )
-#     # db.add(dummy_option)
-#     # db.commit()
-#     # db.close()
-#     # print("Added dummy option.")
+# Removed the __main__ block as engine creation is now in database.py
