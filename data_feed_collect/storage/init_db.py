@@ -20,9 +20,9 @@ from data_feed_collect.storage.database import DataBase
 from data_feed_collect.models import (
     Instrument,
     Stock,
-    Option,
+    # Option, # Removed as it's no longer used for a separate table
     OHLCV,
-    OptionChain,
+    OptionChain, # Use the combined OptionChain model
 )
 from data_feed_collect.utils.logging_config import setup_logging
 
@@ -47,26 +47,28 @@ TABLE_CONFIGS = [
         "order_by": ["symbol"],
         "engine": "MergeTree()"
     },
-    {
-        "model": Option,
-        "table_name": "options",
-        # Using 'contract_symbol' as the primary identifier for option contracts
-        "order_by": ["contract_symbol"],
-        "engine": "MergeTree()"
-    },
+    # Removed the configuration for the 'options' table
+    # {
+    #     "model": Option,
+    #     "table_name": "options",
+    #     # Using 'contract_symbol' as the primary identifier for option contracts
+    #     "order_by": ["contract_symbol"],
+    #     "engine": "MergeTree()"
+    # },
     {
         "model": OHLCV,
         "table_name": "ohlcv",
         # Assuming instrument_id in OHLCV refers to the stock symbol
-        "order_by": ["instrument_id", "timestamp"], # OHLCV data is ordered by instrument (stock symbol) and time
+        "order_by": ["symbol", "timestamp"], # OHLCV data is ordered by instrument (stock symbol) and time
         "engine": "MergeTree()"
     },
     {
-        "model": OptionChain,
-        "table_name": "option_chains",
+        "model": OptionChain, # Use the combined model
+        "table_name": "option_chains", # Use the combined table name
         # Using 'contract_symbol' and 'timestamp' as the primary key for option chain snapshots
         "order_by": ["contract_symbol", "timestamp"], # Option chains ordered by option contract symbol and collection time
-        "engine": "MergeTree()"
+        # Use ReplacingMergeTree with timestamp as the version column for upsert-like behavior
+        "engine": "ReplacingMergeTree(timestamp)"
     },
 ]
 
@@ -87,7 +89,8 @@ def initialize_database(drop_existing: bool = False):
                 # Drop tables in reverse order of potential dependencies if needed,
                 # but for simple tables like these, order doesn't strictly matter.
                 # Dropping in the order of config list is fine.
-                for config in TABLE_CONFIGS:
+                # Drop in reverse order to handle potential foreign key relationships (though not strictly enforced by ClickHouse MergeTree)
+                for config in reversed(TABLE_CONFIGS):
                     table_name = config["table_name"]
                     logger.info(f"Dropping table '{table_name}' if it exists...")
                     try:
@@ -104,6 +107,8 @@ def initialize_database(drop_existing: bool = False):
                 table_name = config["table_name"]
                 order_by = config["order_by"]
                 engine = config.get("engine", "MergeTree()") # Default to MergeTree
+                # Determine primary key - usually the prefix of order_by for MergeTree variants
+                primary_key = config.get("primary_key", order_by[:1]) # Default to the first column of order_by
 
                 logger.info(f"Creating table '{table_name}' from model '{model.__name__}'...")
                 db.create_table(
@@ -111,6 +116,7 @@ def initialize_database(drop_existing: bool = False):
                     table_name=table_name,
                     order_by=order_by,
                     engine=engine,
+                    primary_key=primary_key, # Pass primary_key explicitly
                     if_not_exists=True # Use IF NOT EXISTS to avoid errors if table exists (redundant if dropping, but safe)
                 )
                 logger.info(f"Table '{table_name}' creation process completed.")
