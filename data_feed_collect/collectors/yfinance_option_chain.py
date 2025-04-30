@@ -3,7 +3,7 @@ import concurrent.futures
 import yfinance as yf
 from pyrate_limiter import Limiter, Rate, Duration, BucketFactory, AbstractBucket, RateItem, InMemoryBucket
 from sqlalchemy.orm import Session
-from data_feed_collect.models import YFinanceOption
+from data_feed_collect.models import YFinanceOption, StocksCollection # Import StocksCollection
 from data_feed_collect.database import get_db
 import pandas as pd
 from typing import List, Optional
@@ -166,6 +166,8 @@ def collect_option_chain(ticker_symbol: str):
 
     # Use ThreadPoolExecutor to fetch data for different expiration dates in parallel
     # Max workers can be adjusted based on system resources and desired concurrency
+    # Note: The rate limiter is global, so multiple threads will share the same limit.
+    # This is appropriate for a global API rate limit like yfinance.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
         future_to_date = {executor.submit(fetch_option_chain_for_date, ticker_obj, date): date for date in expiration_dates}
@@ -197,6 +199,9 @@ def collect_option_chain(ticker_symbol: str):
                 logger.error(f"Error processing result for {ticker_symbol} on {date}: {e}")
                 # Log and re-raise the error. This will stop the as_completed loop
                 # and the exception will propagate out of the 'with executor:' block.
+                # If you wanted to allow other tickers/dates to continue, you would
+                # catch the exception here and *not* re-raise it, perhaps just logging it.
+                # For now, we'll let it stop the current ticker's processing.
                 raise
 
     logger.info(f"Finished fetching and transforming data for {ticker_symbol}. Collected {len(all_options_to_save)} option contracts.")
@@ -224,17 +229,64 @@ def collect_option_chain(ticker_symbol: str):
     else:
         logger.info(f"No option contracts to save for {ticker_symbol}.")
 
-# Example of how you might run this function (e.g., in a main script or another module)
-# import asyncio # No longer needed for this version
-from data_feed_collect.models import init_schema
-from data_feed_collect.database import get_engine
+def database_update():
+    """
+    Queries the StocksCollection table for tickers and collects option chain
+    data for each ticker in parallel.
+    """
+    logger.info("Starting database update for option chains...")
+    db: Session = None
+    tickers_to_collect = []
+    try:
+        # Get a database session
+        db = next(get_db())
+        # Query all tickers from the StocksCollection table
+        stocks = db.query(StocksCollection).all()
+        tickers_to_collect = [stock.ticker for stock in stocks]
+        logger.info(f"Found {len(tickers_to_collect)} tickers to collect from database.")
+    except Exception as e:
+        logger.error(f"Error querying database for tickers: {e}")
+        # Log and re-raise the error
+        raise
+    finally:
+        if db:
+            db.close() # Close the session
+
+    if not tickers_to_collect:
+        logger.info("No tickers found in StocksCollection. Database update finished.")
+        return
+
+    # Use ThreadPoolExecutor to run collect_option_chain for each ticker in parallel
+    # Set max_workers to 5 as requested.
+    # Note: The yfinance rate limiter is global and shared across all threads/tickers.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit tasks to the executor
+        future_to_ticker = {executor.submit(collect_option_chain, ticker): ticker for ticker in tickers_to_collect}
+
+        # Process results as they complete (or handle exceptions)
+        for future in concurrent.futures.as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            try:
+                # Get the result from the future. This will re-raise any exceptions
+                # that occurred within the collect_option_chain function for that ticker.
+                future.result()
+                logger.info(f"Successfully completed collection for {ticker}.")
+            except Exception as e:
+                # Catch exceptions re-raised from collect_option_chain
+                logger.error(f"Collection failed for {ticker}: {e}")
+                # Decide how to handle failures:
+                # - Just log and continue with other tickers (current behavior)
+                # - Re-raise to stop the entire process (uncomment the next line)
+                # raise
+
+    logger.info("Database update for option chains finished.")
+
 
 def main():
     # Setup logging first
     setup_logging()
-    collect_option_chain("AAPL")
-    collect_option_chain("MSFT") # Example for another ticker
-
+    # Call the new database_update function
+    database_update()
 
 
 if __name__ == "__main__":
