@@ -107,7 +107,7 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 # Convert pandas types (like numpy.int64, numpy.float64) to Python types
                 option = YFinanceOption(
                     ticker=ticker_symbol,
-                    expiration=pd.to_datetime(expiration_date).to_pydatetime(), # Store as DateTime object
+                    expiration=pd.to_datetime(expiration_date).to_pydatetime(), # Keep as DateTime
                     optionType=option_type,
                     contractSymbol=row.get('contractSymbol'),
                     strike=float(row.get('strike')) if pd.notna(row.get('strike')) else None,
