@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: data-feed-collect-cronjob
+spec:
+  schedule: "*/30 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: collector
+            image: stryker-1.tail46cccc.ts.net:32000/data-feed-collect:latest
+            imagePullPolicy: IfNotPresent # Or Always, depending on your update strategy
+            # Add resource requests/limits here if needed
+            # resources:
+            #   requests:
+            #     memory: "64Mi"
+            #     cpu: "250m"
+            #   limits:
+            #     memory: "128Mi"
+            #     cpu: "500m"
+            # Add command/args if your container needs specific entrypoint overrides
+            # command: ["python", "data_feed_collect/main.py"] # Example
+            # args: ["--some-arg", "some-value"] # Example
+          restartPolicy: OnFailure # Restart the container if it fails
+  # Optional: Configure concurrency policy, suspend, successfulJobsHistoryLimit, failedJobsHistoryLimit
+  # concurrencyPolicy: Allow # Allow multiple job instances to run concurrently (default)
+  # successfulJobsHistoryLimit: 3 # Keep the last 3 successful jobs
+  # failedJobsHistoryLimit: 1 # Keep the last 1 failed job
