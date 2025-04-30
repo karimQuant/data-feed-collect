@@ -8,10 +8,14 @@ spec:
     spec:
       template:
         spec:
+          imagePullSecrets: 
+            - name: ghcr-secret
           containers:
           - name: collector
-            image: container-registry.registry.svc.cluster.local:5000/data-feed-collect:latest
+            image: ghcr.io/karimquant/data-feed-collect:latest
             imagePullPolicy: IfNotPresent # Or Always, depending on your update strategy
+            
+            
             # Add resource requests/limits here if needed
             # resources:
             #   requests:
