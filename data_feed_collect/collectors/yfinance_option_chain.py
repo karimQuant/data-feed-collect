@@ -9,6 +9,11 @@ import pandas as pd
 from typing import List, Optional
 from datetime import datetime
 import time # Needed for TimeClock
+import logging # Import logging module
+from data_feed_collect.logging_config import setup_logging # Import logging setup
+
+# Get a logger instance for this module
+logger = logging.getLogger(__name__)
 
 # Define the rate limits
 # Example: Allow up to 50 calls per minute. Adjust as needed based on yfinance limits.
@@ -70,17 +75,17 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     except Exception as e:
         # This catch is mostly for unexpected errors from try_acquire,
         # as max_delay=inf should prevent LimiterDelayException.
-        print(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
+        logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
         return date, None # Treat rate limit error as a fetch failure
 
-    print(f"Fetching data for {ticker_obj.ticker} on {date}...")
+    logger.info(f"Fetching data for {ticker_obj.ticker} on {date}...")
     try:
         # yfinance calls are synchronous
         option_chain_data = ticker_obj.option_chain(date)
-        print(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
+        logger.info(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
         return date, option_chain_data # Return date along with data to identify result
     except Exception as e:
-        print(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
+        logger.error(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
         # Return date even on error
         return date, None
 
@@ -123,7 +128,7 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 )
                 options.append(option)
             except Exception as e:
-                print(f"Error transforming row for {ticker_symbol} {expiration_date} {option_type}: {e}\nRow data: {row.to_dict()}")
+                logger.error(f"Error transforming row for {ticker_symbol} {expiration_date} {option_type}: {e}\nRow data: {row.to_dict()}")
                 # Decide whether to skip the row or handle the error differently
                 continue
     return options
@@ -135,7 +140,7 @@ def collect_option_chain(ticker_symbol: str):
 
     Uses threading for parallel fetching and pyrate-limiter for rate limiting.
     """
-    print(f"Starting option chain collection for {ticker_symbol}...")
+    logger.info(f"Starting option chain collection for {ticker_symbol}...")
     ticker_obj = yf.Ticker(ticker_symbol)
 
     # Fetch expiration dates. This call is synchronous.
@@ -146,12 +151,12 @@ def collect_option_chain(ticker_symbol: str):
         limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
         expiration_dates = ticker_obj.options
         if not expiration_dates:
-            print(f"No expiration dates found for {ticker_symbol}. Skipping.")
+            logger.info(f"No expiration dates found for {ticker_symbol}. Skipping.")
             return
-        print(f"Found {len(expiration_dates)} expiration dates for {ticker_symbol}.")
+        logger.info(f"Found {len(expiration_dates)} expiration dates for {ticker_symbol}.")
     except Exception as e:
         # Catch potential errors from try_acquire or ticker_obj.options
-        print(f"Error fetching expiration dates for {ticker_symbol}: {e}")
+        logger.error(f"Error fetching expiration dates for {ticker_symbol}: {e}")
         return
 
     all_options_to_save: List[YFinanceOption] = []
@@ -182,10 +187,10 @@ def collect_option_chain(ticker_symbol: str):
                 all_options_to_save.extend(puts_options)
 
             except Exception as e:
-                print(f"Error processing result for {ticker_symbol} on {date}: {e}")
+                logger.error(f"Error processing result for {ticker_symbol} on {date}: {e}")
                 # Continue processing other results even if one fails
 
-    print(f"Finished fetching and transforming data for {ticker_symbol}. Collected {len(all_options_to_save)} option contracts.")
+    logger.info(f"Finished fetching and transforming data for {ticker_symbol}. Collected {len(all_options_to_save)} option contracts.")
 
     # Save all collected option contracts to the database in a single transaction
     if all_options_to_save:
@@ -193,20 +198,20 @@ def collect_option_chain(ticker_symbol: str):
         try:
             # Get a database session using the generator pattern
             db = next(get_db())
-            print(f"Saving {len(all_options_to_save)} option contracts to database for {ticker_symbol}...")
+            logger.info(f"Saving {len(all_options_to_save)} option contracts to database for {ticker_symbol}...")
             # Use bulk_save_objects for efficiency when saving many objects
             db.bulk_save_objects(all_options_to_save)
             db.commit()
-            print(f"Successfully saved data for {ticker_symbol}.")
+            logger.info(f"Successfully saved data for {ticker_symbol}.")
         except Exception as e:
-            print(f"Error saving data to database for {ticker_symbol}: {e}")
+            logger.error(f"Error saving data to database for {ticker_symbol}: {e}")
             if db:
                 db.rollback() # Roll back the transaction on error
         finally:
             if db:
                 db.close() # Close the session
     else:
-        print(f"No option contracts to save for {ticker_symbol}.")
+        logger.info(f"No option contracts to save for {ticker_symbol}.")
 
 # Example of how you might run this function (e.g., in a main script or another module)
 # import asyncio # No longer needed for this version
@@ -214,6 +219,9 @@ from data_feed_collect.models import init_schema
 from data_feed_collect.database import get_engine
 
 def main():
+    # Setup logging first
+    setup_logging()
+
     # Ensure schema is initialized before running collectors
     # engine = get_engine()
     # init_schema(engine) # Run this once when setting up the database
