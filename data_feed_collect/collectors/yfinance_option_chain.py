@@ -152,13 +152,13 @@ async def collect_option_chain(ticker_symbol: str):
 # from data_feed_collect.models import init_schema
 # from data_feed_collect.database import get_engine
 
-# async def main():
-#     # Ensure schema is initialized before running collectors
-#     # engine = get_engine()
-#     # init_schema(engine) # Run this once when setting up the database
+async def main():
+    # Ensure schema is initialized before running collectors
+    # engine = get_engine()
+    # init_schema(engine) # Run this once when setting up the database
 
-#     await collect_option_chain("AAPL")
-#     await collect_option_chain("MSFT") # Example for another ticker
+    await collect_option_chain("AAPL")
+    await collect_option_chain("MSFT") # Example for another ticker
 
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
