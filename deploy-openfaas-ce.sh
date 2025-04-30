@@ -3,7 +3,7 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-NAMESPACE="data-feed-collect"
+NAMESPACE="openfaas" # Changed namespace back to openfaas
 GATEWAY_NODEPORT="31112" # Example NodePort in the 30xxx range
 
 echo "--- Deploying OpenFaaS Community Edition ---"
