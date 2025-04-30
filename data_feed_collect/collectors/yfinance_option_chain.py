@@ -106,10 +106,10 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 # Use .get() to safely access columns that might be missing
                 # Convert pandas types (like numpy.int64, numpy.float64) to Python types
                 option = YFinanceOption(
-                    symbol=ticker_symbol,
-                    expiration_date=expiration_date,
-                    option_type=option_type, # 'call' or 'put'
-                    contract_symbol=row.get('contractSymbol'),
+                    ticker=ticker_symbol,
+                    expiration=int(pd.to_datetime(expiration_date).timestamp()), # Convert to Unix timestamp
+                    optionType=option_type,
+                    contractSymbol=row.get('contractSymbol'),
                     strike=float(row.get('strike')) if pd.notna(row.get('strike')) else None,
                     last_price=float(row.get('lastPrice')) if pd.notna(row.get('lastPrice')) else None,
                     bid=float(row.get('bid')) if pd.notna(row.get('bid')) else None,
@@ -231,20 +231,10 @@ from data_feed_collect.database import get_engine
 
 def main():
     # Setup logging first
-    setup_logging()
+    setup_logging()    
+    collect_option_chain("AAPL")
+    collect_option_chain("MSFT") # Example for another ticker
 
-    # Ensure schema is initialized before running collectors
-    # engine = get_engine()
-    # init_schema(engine) # Run this once when setting up the database
-
-    try:
-        collect_option_chain("AAPL")
-        collect_option_chain("MSFT") # Example for another ticker
-    except Exception as e:
-        # Catch any errors that propagated up from collect_option_chain
-        logger.critical(f"An unhandled error occurred during data collection: {e}", exc_info=True)
-        # Depending on desired behavior, you might want to exit with a non-zero status code
-        # sys.exit(1)
 
 
 if __name__ == "__main__":
