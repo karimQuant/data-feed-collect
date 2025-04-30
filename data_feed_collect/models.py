@@ -3,6 +3,7 @@ from sqlalchemy.orm import declarative_base
 from datetime import datetime
 from data_feed_collect.database import get_engine # Import get_engine
 # No need to import Table from sqlalchemy.schema for this approach
+from clickhouse_sqlalchemy import engines # Import ClickHouse engines
 
 # Define the base for declarative models
 Base = declarative_base()
@@ -38,12 +39,12 @@ class YFinanceOption(Base):
     # Add ClickHouse specific table arguments
     # This tells the clickhouse-sqlalchemy dialect how to create the table
     __table_args__ = (
-        # Define the ClickHouse Engine and Order By clause
-        # Use standard SQLAlchemy argument names 'engine' and 'order_by'
-        {
-            'engine': 'MergeTree()', # Changed from 'clickhouse_engine'
-            'order_by': '(ticker, contractSymbol, data_collected_timestamp)' # Changed from 'clickhouse_order_by'
-        }
+        # Define the ClickHouse Engine as an instance of the engine class
+        engines.MergeTree(
+            order_by=(ticker, contractSymbol, data_collected_timestamp) # Pass order_by to the engine constructor
+        ),
+        # Optional: Add other table arguments in a dictionary if needed (e.g., comment, cluster)
+        # {'comment': 'Yahoo Finance Option Chain Data'}
     )
 
 
@@ -60,7 +61,7 @@ def init_schema(engine):
         engine: SQLAlchemy engine instance.
     """
     print("Initializing database schema...")
-    # Base.metadata.create_all will now use the __table_args__ with correct keys
+    # Base.metadata.create_all will now use the __table_args__ with the engine instance
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
