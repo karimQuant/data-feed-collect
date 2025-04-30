@@ -8,14 +8,32 @@ spec:
     spec:
       template:
         spec:
-          imagePullSecrets: 
+          imagePullSecrets:
             - name: ghcr-secret
           containers:
           - name: collector
             image: ghcr.io/karimquant/data-feed-collect:latest
             imagePullPolicy: IfNotPresent # Or Always, depending on your update strategy
-            
-            
+
+            env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: postgres-password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: postgres-db
+            - name: DATABASE_URL
+              value: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-service:5432/$(POSTGRES_DB)"
+
             # Add resource requests/limits here if needed
             # resources:
             #   requests:
