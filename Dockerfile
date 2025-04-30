@@ -1,5 +1,6 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim
+# Changed from 3.9-slim to 3.10-slim to satisfy pyproject.toml requirement
+FROM python:3.10-slim
 
 # Set the working directory in the container
 WORKDIR /app
@@ -14,7 +15,7 @@ COPY pyproject.toml ./
 # Install dependencies using uv
 # uv pip install . reads pyproject.toml and installs the dependencies from the current directory
 # --system flag installs into the system site-packages, suitable for Docker
-RUN uv pip install .
+RUN uv pip install --system .
 
 # Copy the rest of the application code
 # This assumes your application code is under data_feed_collect/
