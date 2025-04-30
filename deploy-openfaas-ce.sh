@@ -3,7 +3,7 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-NAMESPACE="openfaas"
+NAMESPACE="data-feed-collect"
 GATEWAY_NODEPORT="31112" # Example NodePort in the 30xxx range
 
 echo "--- Deploying OpenFaaS Community Edition ---"
