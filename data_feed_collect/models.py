@@ -28,11 +28,11 @@ class YFinanceOption(Base):
     volume = Column(Integer) # Can be None
     openInterest = Column(Integer) # Can be None
     bid = Column(Float) # Can be None
-    ask = Column[Float](Float) # Corrected type hint
+    ask = Column(Float) # Can be None
     contractSize = Column(String, nullable=False) # e.g., 'REGULAR'
-    expiration = Column(DateTime, nullable=False) # Unix timestamp of expiration date
+    expiration = Column(DateTime, nullable=False) # Stored as DateTime type
     lastTradeDate = Column(DateTime) # Unix timestamp of last trade date, can be None
-    impliedVolatility = Column[Float](Float) # Corrected type hint
+    impliedVolatility = Column(Float) # Can be None
     inTheMoney = Column(Boolean, nullable=False)
     optionType = Column(String, nullable=False) # 'call' or 'put'
 

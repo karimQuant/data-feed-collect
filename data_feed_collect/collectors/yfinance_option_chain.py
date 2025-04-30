@@ -107,7 +107,7 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 # Convert pandas types (like numpy.int64, numpy.float64) to Python types
                 option = YFinanceOption(
                     ticker=ticker_symbol,
-                    expiration=int(pd.to_datetime(expiration_date).timestamp()), # Convert to Unix timestamp
+                    expiration=pd.to_datetime(expiration_date), # Store as DateTime object
                     optionType=option_type,
                     contractSymbol=row.get('contractSymbol'),
                     strike=float(row.get('strike')) if pd.notna(row.get('strike')) else None,
@@ -117,12 +117,12 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                     volume=int(row.get('volume')) if pd.notna(row.get('volume')) else None,
                     openInterest=int(row.get('openInterest')) if pd.notna(row.get('openInterest')) else None, # Corrected attribute name
                     impliedVolatility=float(row.get('impliedVolatility')) if pd.notna(row.get('impliedVolatility')) else None, # Corrected attribute name
-                    inTheMoney=bool(row.get('inTheMoney')) if pd.notna(row.get('inTheMoney')) else None, # Corrected attribute name
+                    inTheMoney=bool(row.get('inTheMoney')) if pd.notna(row.get('inTheMoney')) else False,
                     contractSize=row.get('contractSize'), # Corrected attribute name
                     currency=row.get('currency'), # Assuming string
                     # Handle date conversion if necessary. yfinance often returns datetime objects.
                     # Ensure lastTradeDate is converted to a standard Python datetime if needed by SQLAlchemy model
-                    lastTradeDate=row.get('lastTradeDate'), # Corrected attribute name
+                    lastTradeDate=pd.to_datetime(row.get('lastTradeDate')) if pd.notna(row.get('lastTradeDate')) else None,
                     change=float(row.get('change')) if pd.notna(row.get('change')) else None,
                     percentChange=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None, # Corrected attribute name
                     data_collected_timestamp=collected_at # Corrected attribute name
