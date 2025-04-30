@@ -23,6 +23,7 @@ dependencies = [
     "pytest>=8.3.5",
     "yfinance>=0.2.57",
     "pyrate-limiter>=3.7.0",
+    "clickhouse-sqlalchemy>=0.3.2",
 ]
 
 [project.optional-dependencies]
