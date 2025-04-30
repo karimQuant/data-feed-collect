@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, D
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 from data_feed_collect.database import get_engine # Import get_engine
+# No need to import Table from sqlalchemy.schema for this approach
 
 # Define the base for declarative models
 Base = declarative_base()
@@ -30,9 +31,21 @@ class YFinanceOption(Base):
     contractSize = Column(String, nullable=False) # e.g., 'REGULAR'
     expiration = Column(Integer, nullable=False) # Unix timestamp of expiration date
     lastTradeDate = Column(Integer) # Unix timestamp of last trade date, can be None
-    impliedVolatility = Column(Float)
+    impliedVolatility = Column[Float](Float) # Corrected type hint
     inTheMoney = Column(Boolean, nullable=False)
     optionType = Column(String, nullable=False) # 'call' or 'put'
+
+    # Add ClickHouse specific table arguments
+    # This tells the clickhouse-sqlalchemy dialect how to create the table
+    __table_args__ = (
+        # Define the ClickHouse Engine and Order By clause
+        # 'clickhouse_engine' and 'clickhouse_order_by' are dialect-specific keys
+        {
+            'clickhouse_engine': 'MergeTree()',
+            'clickhouse_order_by': '(ticker, contractSymbol, data_collected_timestamp)'
+        }
+    )
+
 
     def __repr__(self):
         return (f"<YFinanceOption(contractSymbol='{self.contractSymbol}', ticker='{self.ticker}', "
@@ -47,6 +60,7 @@ def init_schema(engine):
         engine: SQLAlchemy engine instance.
     """
     print("Initializing database schema...")
+    # Base.metadata.create_all will now use the __table_args__ when compiling for ClickHouse
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
