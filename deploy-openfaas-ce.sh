@@ -10,7 +10,8 @@ echo "--- Deploying OpenFaaS Community Edition ---"
 
 # 1. Add the OpenFaaS helm repository
 echo "Adding OpenFaaS helm repository..."
-helm repo add openfaas https://openfaas.github.io/faas-netd/
+# Corrected the repository URL from faas-netd to faas-netes
+helm repo add openfaas https://openfaas.github.io/faas-netes/
 
 # 2. Update your local helm repositories
 echo "Updating helm repositories..."
