@@ -12,15 +12,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # If DATABASE_URL is not set, try to construct it from individual ClickHouse variables
 if not DATABASE_URL:
-    ch_host = os.getenv("CLICKHOUSE_HOST")
-    ch_port = os.getenv("CLICKHOUSE_PORT")
-    ch_database = os.getenv("CLICKHOUSE_DATABASE")
-    ch_user = os.getenv("CLICKHOUSE_USER")
-    ch_password = os.getenv("CLICKHOUSE_PASSWORD")
+    ch_host = os.getenv("POSTGRES_HOST")
+    ch_port = os.getenv("POSTGRES_PORT")
+    ch_database = os.getenv("POSTGRES_DATABASE")
+    ch_user = os.getenv("POSTGRES_USER")
+    ch_password = os.getenv("POSTGRES_PASSWORD")
 
-    # Check if required ClickHouse variables are set for construction
+    # Check if required PostgreSQL variables are set for construction
     if ch_host and ch_port and ch_database:
-        # Construct the ClickHouse URL
+        # Construct the PostgreSQL URL
         # Format: clickhouse://user:password@host:port/database
         # Note: Requires the 'clickhouse-sqlalchemy' driver
         auth_part = ""

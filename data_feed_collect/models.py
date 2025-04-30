@@ -3,7 +3,6 @@ from sqlalchemy.orm import declarative_base
 from datetime import datetime
 from data_feed_collect.database import get_engine # Import get_engine
 # No need to import Table from sqlalchemy.schema for this approach
-from clickhouse_sqlalchemy import engines # Import ClickHouse engines
 
 # Define the base for declarative models
 Base = declarative_base()
@@ -14,10 +13,10 @@ class YFinanceOption(Base):
     """
     __tablename__ = 'yfinance_options'
 
-    # Composite Primary Key to uniquely identify an option snapshot
-    contractSymbol = Column(String, primary_key=True)
-    ticker = Column(String, primary_key=True)
-    data_collected_timestamp = Column(DateTime, primary_key=True) # Timestamp when data was collected
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    contractSymbol = Column(String, index=True)
+    ticker = Column(String, index=True)
+    data_collected_timestamp = Column(DateTime, index=True) # Timestamp when data was collected
 
     # Option specific data fields from Yahoo Finance
     strike = Column(Float, nullable=False)
@@ -36,15 +35,8 @@ class YFinanceOption(Base):
     inTheMoney = Column(Boolean, nullable=False)
     optionType = Column(String, nullable=False) # 'call' or 'put'
 
-    # Add ClickHouse specific table arguments
-    # This tells the clickhouse-sqlalchemy dialect how to create the table
     __table_args__ = (
-        # Define the ClickHouse Engine as an instance of the engine class
-        engines.MergeTree(
-            order_by=(ticker, contractSymbol, data_collected_timestamp) # Pass order_by to the engine constructor
-        ),
-        # Optional: Add other table arguments in a dictionary if needed (e.g., comment, cluster)
-        # {'comment': 'Yahoo Finance Option Chain Data'}
+        {'comment': 'Yahoo Finance Option Chain Data'},
     )
 
 
