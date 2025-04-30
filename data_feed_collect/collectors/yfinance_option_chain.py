@@ -76,7 +76,8 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
         # This catch is mostly for unexpected errors from try_acquire,
         # as max_delay=inf should prevent LimiterDelayException.
         logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
-        return date, None # Treat rate limit error as a fetch failure
+        # Log and re-raise the unexpected error
+        raise
 
     logger.info(f"Fetching data for {ticker_obj.ticker} on {date}...")
     try:
@@ -86,8 +87,8 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
         return date, option_chain_data # Return date along with data to identify result
     except Exception as e:
         logger.error(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
-        # Return date even on error
-        return date, None
+        # Log and re-raise the error during fetch
+        raise
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -129,8 +130,9 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                 options.append(option)
             except Exception as e:
                 logger.error(f"Error transforming row for {ticker_symbol} {expiration_date} {option_type}: {e}\nRow data: {row.to_dict()}")
-                # Decide whether to skip the row or handle the error differently
-                continue
+                # Log and re-raise the error during transformation
+                raise # Re-raise the exception
+
     return options
 
 def collect_option_chain(ticker_symbol: str):
@@ -157,7 +159,8 @@ def collect_option_chain(ticker_symbol: str):
     except Exception as e:
         # Catch potential errors from try_acquire or ticker_obj.options
         logger.error(f"Error fetching expiration dates for {ticker_symbol}: {e}")
-        return
+        # Log and re-raise the error
+        raise
 
     all_options_to_save: List[YFinanceOption] = []
 
@@ -171,15 +174,18 @@ def collect_option_chain(ticker_symbol: str):
         for future in concurrent.futures.as_completed(future_to_date):
             date = future_to_date[future]
             try:
-                # Get the result from the future (this will raise exceptions if the task failed)
-                # The result is a tuple: (date, option_chain_data or None)
+                # Get the result from the future (this will re-raise exceptions
+                # that occurred in the thread, including those we explicitly re-raise)
                 fetched_date, option_chain_data = future.result()
 
                 if option_chain_data is None:
-                    # Error was already printed in fetch_option_chain_for_date
+                    # If fetch_option_chain_for_date returned None (e.g., due to an error
+                    # that wasn't re-raised, though we've changed that now), skip.
+                    # With the changes above, future.result() will likely raise instead.
                     continue
 
                 # Transform calls and puts dataframes into model instances
+                # This call might re-raise if transformation fails for any row
                 calls_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.calls, 'call')
                 puts_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.puts, 'put')
 
@@ -187,8 +193,11 @@ def collect_option_chain(ticker_symbol: str):
                 all_options_to_save.extend(puts_options)
 
             except Exception as e:
+                # Catch exceptions re-raised from fetch_option_chain_for_date or transform_option_data
                 logger.error(f"Error processing result for {ticker_symbol} on {date}: {e}")
-                # Continue processing other results even if one fails
+                # Log and re-raise the error. This will stop the as_completed loop
+                # and the exception will propagate out of the 'with executor:' block.
+                raise
 
     logger.info(f"Finished fetching and transforming data for {ticker_symbol}. Collected {len(all_options_to_save)} option contracts.")
 
@@ -207,6 +216,8 @@ def collect_option_chain(ticker_symbol: str):
             logger.error(f"Error saving data to database for {ticker_symbol}: {e}")
             if db:
                 db.rollback() # Roll back the transaction on error
+            # Log and re-raise the database error
+            raise
         finally:
             if db:
                 db.close() # Close the session
@@ -226,8 +237,15 @@ def main():
     # engine = get_engine()
     # init_schema(engine) # Run this once when setting up the database
 
-    collect_option_chain("AAPL")
-    collect_option_chain("MSFT") # Example for another ticker
+    try:
+        collect_option_chain("AAPL")
+        collect_option_chain("MSFT") # Example for another ticker
+    except Exception as e:
+        # Catch any errors that propagated up from collect_option_chain
+        logger.critical(f"An unhandled error occurred during data collection: {e}", exc_info=True)
+        # Depending on desired behavior, you might want to exit with a non-zero status code
+        # sys.exit(1)
+
 
 if __name__ == "__main__":
     main() # Call the synchronous main function
