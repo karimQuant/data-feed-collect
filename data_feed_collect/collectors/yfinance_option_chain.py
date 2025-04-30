@@ -10,9 +10,9 @@ from typing import List
 from datetime import datetime # Added for potential collected_at timestamp
 
 # Define the global rate limiter
-# Example: Allow up to 10 calls per minute. Adjust as needed based on yfinance limits.
+# Example: Allow up to 50 calls per minute. Adjust as needed based on yfinance limits.
 # Note: yfinance limits are not officially documented and can change.
-# The Limiter class is thread-safe when used with 'with limiter:'
+# The Limiter class is thread-safe when used with 'limiter.block()'
 limiter = Limiter(Rate(50, Duration.MINUTE))
 
 def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
@@ -21,17 +21,18 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     applying rate limiting. This function is designed to be run in a thread.
     """
     # Apply rate limiting before making the call
-    with limiter:
-        print(f"Fetching data for {ticker_obj.ticker} on {date}...")
-        try:
-            # yfinance calls are synchronous, no need for asyncio.to_thread here
-            option_chain_data = ticker_obj.option_chain(date)
-            print(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
-            return date, option_chain_data # Return date along with data to identify result
-        except Exception as e:
-            print(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
-            # Return None or raise the exception, depending on desired error handling
-            return date, None # Return date even on error
+    # Use limiter.block() for synchronous blocking
+    limiter.block()
+    print(f"Fetching data for {ticker_obj.ticker} on {date}...")
+    try:
+        # yfinance calls are synchronous, no need for asyncio.to_thread here
+        option_chain_data = ticker_obj.option_chain(date)
+        print(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
+        return date, option_chain_data # Return date along with data to identify result
+    except Exception as e:
+        print(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
+        # Return None or raise the exception, depending on desired error handling
+        return date, None # Return date even on error
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -90,8 +91,9 @@ def collect_option_chain(ticker_symbol: str):
     # Fetch expiration dates. This call is synchronous.
     try:
         # Apply rate limiting to the initial options call as well
-        with limiter:
-             expiration_dates = ticker_obj.options
+        # Use limiter.block() for synchronous blocking
+        limiter.block()
+        expiration_dates = ticker_obj.options
         if not expiration_dates:
             print(f"No expiration dates found for {ticker_symbol}. Skipping.")
             return
