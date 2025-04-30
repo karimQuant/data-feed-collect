@@ -29,6 +29,7 @@ helm upgrade openfaas \
     --namespace "$NAMESPACE" \
     --set gateway.serviceType=NodePort \
     --set gateway.nodePort="$GATEWAY_NODEPORT" \
+    --set functionNamespace="$NAMESPACE" \
     --set basic_auth=true # Recommended for CE
 
 echo "--- OpenFaaS deployment initiated ---"
