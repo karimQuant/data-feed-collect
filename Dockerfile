@@ -1,6 +1,6 @@
 # Use an official Python runtime as a parent image
-# Changed from 3.9-slim to 3.10-slim to satisfy pyproject.toml requirement
-FROM python:3.10-slim
+# Changed from 3.10-slim to 3.11-slim to align with .uv/settings.toml preference
+FROM python:3.11-slim
 
 # Set the working directory in the container
 WORKDIR /app
