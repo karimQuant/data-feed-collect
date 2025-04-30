@@ -14,7 +14,7 @@ COPY pyproject.toml ./
 # Install dependencies using uv
 # uv pip install . reads pyproject.toml and installs the dependencies from the current directory
 # --system flag installs into the system site-packages, suitable for Docker
-RUN uv pip install --system .
+RUN uv pip install .
 
 # Copy the rest of the application code
 # This assumes your application code is under data_feed_collect/
