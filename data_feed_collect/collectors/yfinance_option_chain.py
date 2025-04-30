@@ -13,7 +13,7 @@ from datetime import datetime # Added for potential collected_at timestamp
 # Example: Allow up to 10 calls per minute. Adjust as needed based on yfinance limits.
 # Note: yfinance limits are not officially documented and can change.
 # The Limiter class is thread-safe when used with 'with limiter:'
-limiter = Limiter(Rate(10, Duration.MINUTE))
+limiter = Limiter(Rate(50, Duration.MINUTE))
 
 def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
