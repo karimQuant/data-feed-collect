@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "A Python project for collecting and processing data feeds"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+# Changed license from table to string format to fix deprecation warning
+license = "MIT"
 authors = [
     {name = "karimQuant", email = "karim.taaam@gmail.com"}
 ]
