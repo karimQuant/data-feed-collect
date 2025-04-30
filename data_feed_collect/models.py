@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
+from data_feed_collect.database import get_engine # Import get_engine
 
 # Define the base for declarative models
 Base = declarative_base()
@@ -49,4 +50,7 @@ def init_schema(engine):
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
-# Removed the __main__ block as engine creation is now in database.py
+# Add __main__ block to initialize schema when the file is run directly
+if __name__ == '__main__':
+    engine = get_engine() # Get the engine from the database module
+    init_schema(engine) # Initialize the schema
