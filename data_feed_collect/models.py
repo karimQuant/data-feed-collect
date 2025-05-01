@@ -34,6 +34,9 @@ class YFinanceOption(Base):
     inTheMoney = Column(Boolean, nullable=False, comment='Indicates if the option is currently in the money (True) or out of the money (False)')
     optionType = Column(String, nullable=False, comment='The type of option contract (e.g., call or put)') # 'call' or 'put'
 
+    # New column for underlying price
+    underlying_price = Column(Float, comment='The price of the underlying stock at the time the option data was collected')
+
     __table_args__ = (
         {'comment': 'Stores detailed option chain data fetched from Yahoo Finance for various tickers and expiration dates.'},
     )
@@ -42,7 +45,7 @@ class YFinanceOption(Base):
     def __repr__(self):
         return (f"<YFinanceOption(contractSymbol='{self.contractSymbol}', ticker='{self.ticker}', "
                 f"data_collected_timestamp='{self.data_collected_timestamp.isoformat()}', "
-                f"strike={self.strike}, optionType='{self.optionType}')>")
+                f"strike={self.strike}, optionType='{self.optionType}', underlying_price={self.underlying_price})>")
 
 class StocksCollection(Base):
     """

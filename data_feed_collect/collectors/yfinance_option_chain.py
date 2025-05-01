@@ -65,11 +65,11 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     #     logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
     #     raise
 
-    logger.info(f"Fetching data for {ticker_obj.ticker} on {date}...")
+    logger.info(f"Fetching option chain data for {ticker_obj.ticker} on {date}...")
     # The limiter decorator handles waiting if the rate limit is hit.
     # The backoff decorator handles retries if an exception occurs here after waiting.
     option_chain_data = ticker_obj.option_chain(date)
-    logger.info(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
+    logger.info(f"Successfully fetched option chain data for {ticker_obj.ticker} on {date}.")
     return date, option_chain_data # Return date along with data to identify result
 
 @backoff.on_exception(backoff.expo,
@@ -90,11 +90,40 @@ def _fetch_ticker_options(ticker_obj: yf.Ticker) -> List[str]:
     logger.info(f"Successfully fetched expiration dates for {ticker_obj.ticker}.")
     return expiration_dates
 
+@backoff.on_exception(backoff.expo,
+                      Exception, # Retry on any Exception. Refine this if specific errors are known.
+                      max_time=180, # Max retry duration in seconds (3 minutes)
+                      logger=logger) # Use the module logger for backoff messages
+# Apply the new limiter decorator
+@yfinance_limiter
+def _fetch_current_stock_price(ticker_obj: yf.Ticker) -> Optional[float]:
+    """
+    Fetches the current stock price for a yfinance Ticker object,
+    applying rate limiting and exponential backoff on errors.
+    """
+    ticker_symbol = ticker_obj.ticker
+    logger.info(f"Fetching current price for {ticker_symbol}...")
+    try:
+        # Fetching info is a common way to get current price
+        info = ticker_obj.info
+        # yfinance info dictionary keys can vary, 'currentPrice' is common
+        current_price = info.get('currentPrice')
+        if current_price is not None:
+             logger.info(f"Successfully fetched current price for {ticker_symbol}: {current_price}")
+             return float(current_price) # Ensure it's a float
+        else:
+             logger.warning(f"Could not find 'currentPrice' in info for {ticker_symbol}. Info keys: {info.keys()}")
+             return None
+    except Exception as e:
+        logger.error(f"Error fetching current price for {ticker_symbol}: {e}")
+        # Re-raise the exception to trigger backoff
+        raise
 
-def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
+
+def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str, underlying_price: Optional[float]) -> List[YFinanceOption]:
     """
     Transforms a pandas DataFrame of option data (calls or puts) into a list
-    of YFinanceOption model instances.
+    of YFinanceOption model instances, including the underlying price.
     """
     options = []
     if df is not None and not df.empty:
@@ -125,7 +154,8 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                     lastTradeDate=pd.to_datetime(row.get('lastTradeDate')) if pd.notna(row.get('lastTradeDate')) else None,
                     change=float(row.get('change')) if pd.notna(row.get('change')) else None,
                     percentChange=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None, # Corrected attribute name
-                    data_collected_timestamp=collected_at # Corrected attribute name
+                    data_collected_timestamp=collected_at, # Corrected attribute name
+                    underlying_price=underlying_price # Add the underlying price
                 )
                 options.append(option)
             except Exception as e:
@@ -141,9 +171,26 @@ def collect_option_chain(ticker_symbol: str):
     saves the data to the database.
 
     Uses threading for parallel fetching and limiter for rate limiting.
+    Fetches underlying price once per ticker.
     """
     logger.info(f"Starting option chain collection for {ticker_symbol}...")
     ticker_obj = yf.Ticker(ticker_symbol)
+
+    # Fetch the current underlying stock price first
+    try:
+        underlying_price = _fetch_current_stock_price(ticker_obj)
+        if underlying_price is None:
+             logger.warning(f"Could not fetch underlying price for {ticker_symbol}. Option data will be collected without it.")
+             # Continue with None if price couldn't be fetched
+    except Exception as e:
+        # Catch potential errors from _fetch_current_stock_price (after backoff attempts)
+        logger.error(f"Error fetching underlying price for {ticker_symbol}: {e}")
+        # Decide whether to stop or continue without price.
+        # For now, we'll log and re-raise, stopping collection for this ticker.
+        # If you want to continue without the price, remove the 'raise' below.
+        raise
+        # underlying_price = None # Uncomment this line if you want to continue without the price
+
 
     # Fetch expiration dates using the new helper function with decorators
     try:
@@ -187,9 +234,9 @@ def collect_option_chain(ticker_symbol: str):
                     continue
 
                 # Transform calls and puts dataframes into model instances
-                # This call might re-raise if transformation fails for any row
-                calls_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.calls, 'call')
-                puts_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.puts, 'put')
+                # Pass the fetched underlying_price to the transform function
+                calls_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.calls, 'call', underlying_price)
+                puts_options = transform_option_data(ticker_symbol, fetched_date, option_chain_data.puts, 'put', underlying_price)
 
                 all_options_to_save.extend(calls_options)
                 all_options_to_save.extend(puts_options)
@@ -264,7 +311,7 @@ def database_update():
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
         # collect_option_chain itself doesn't have the rate limit decorator,
-        # but the functions it calls (_fetch_ticker_options and fetch_option_chain_for_date) do.
+        # but the functions it calls (_fetch_ticker_options, fetch_option_chain_for_date, _fetch_current_stock_price) do.
         future_to_ticker = {executor.submit(collect_option_chain, ticker): ticker for ticker in tickers_to_collect}
 
         # Process results as they complete (or handle exceptions)
