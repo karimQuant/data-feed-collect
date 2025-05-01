@@ -26,7 +26,7 @@ spec:
                 secretKeyRef:
                   name: postgres-secret
                   key: postgres-password
-            - name: POSTGRES_DB
+            - name: POSTGRES_DATABASE
               value: "postgres"
             - name: POSTGRES_HOST
               value: "postgres-service"
@@ -42,9 +42,7 @@ spec:
                 memory: "10Gi"
                 cpu: "4"
             # Add command/args if your container needs specific entrypoint overrides
-            # command: ["python", "data_feed_collect/main.py"] # Example
-            command: ["/bin/sh", "-c"]
-            # args: ["python3 data_feed_collect/collectors/yfinance_option_chain.py"]
-            args: ["tail", "-f", "/dev/null"] # Keep the container running for debugging purposes
+            command: ["sh", "-c"]
+            args: ["python data_feed_collect/collectors/yfinance_option_chain.py"]
           restartPolicy: OnFailure # Restart the container if it fails
   
