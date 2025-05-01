@@ -104,9 +104,4 @@ def insert_qqq_composition():
 
 
 if __name__ == "__main__":
-    # Ensure the DATABASE_URL environment variable is set before running this script
-    if not os.getenv("DATABASE_URL"):
-         print("Error: DATABASE_URL environment variable is not set.", file=sys.stderr)
-         sys.exit(1)
-
     insert_qqq_composition()
