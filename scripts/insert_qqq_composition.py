@@ -17,8 +17,8 @@ CSV_FILE_PATH = 'data/qqq_composition.csv'
 
 def insert_qqq_composition():
     """
-    Reads the QQQ composition CSV and inserts/updates stock information
-    into the StocksCollection table using db.merge().
+    Reads the QQQ composition CSV, deduplicates, and inserts/updates
+    stock information into the StocksCollection table using db.merge().
     """
     if not os.path.exists(CSV_FILE_PATH):
         print(f"Error: CSV file not found at {CSV_FILE_PATH}", file=sys.stderr)
@@ -34,6 +34,17 @@ def insert_qqq_composition():
 
         print(f"Reading data from {CSV_FILE_PATH}...")
         print(f"Found {len(df)} rows.")
+
+        # --- Add deduplication step ---
+        initial_rows = len(df)
+        df.drop_duplicates(subset=['Ticker'], keep='first', inplace=True)
+        deduplicated_rows = len(df)
+        if initial_rows > deduplicated_rows:
+            print(f"Removed {initial_rows - deduplicated_rows} duplicate ticker entries from CSV.")
+        # -----------------------------
+
+        print(f"Processing {deduplicated_rows} unique ticker entries.")
+
 
         db = next(get_db())
 
