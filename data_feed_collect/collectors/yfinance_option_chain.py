@@ -165,7 +165,8 @@ def collect_option_chain(ticker_symbol: str):
 
         # Process results as they complete
         for future in concurrent.futures.as_completed(future_to_date):
-            date = future_to_ticker[future] # Corrected variable name from future_to_date
+            # Corrected variable name from future_to_ticker to future_to_date
+            date = future_to_date[future]
             try:
                 # Get the result from the future (this will re-raise exceptions
                 # that occurred in the thread, including those handled/retried by backoff
