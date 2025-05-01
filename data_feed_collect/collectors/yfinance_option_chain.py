@@ -11,6 +11,7 @@ from datetime import datetime
 import time # Needed for TimeClock
 import logging # Import logging module
 from data_feed_collect.logging_config import setup_logging # Import logging setup
+import backoff # Import backoff library
 
 # Get a logger instance for this module
 logger = logging.getLogger(__name__)
@@ -59,11 +60,15 @@ limiter = Limiter(bucket_factory, max_delay=float('inf'))
 # Using a constant name ensures all calls contribute to the same bucket/rate limit.
 GLOBAL_YFINANCE_ITEM_NAME = "yfinance_api_call"
 
-
+@backoff.on_exception(backoff.expo,
+                      Exception, # Retry on any Exception. Refine this if specific errors are known.
+                      max_time=180, # Max retry duration in seconds (3 minutes)
+                      logger=logger) # Use the module logger for backoff messages
 def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     Fetches option chain for a specific date for a yfinance Ticker object,
-    applying rate limiting. This function is designed to be run in a thread.
+    applying rate limiting and exponential backoff on errors.
+    This function is designed to be run in a thread.
     """
     ticker_symbol = ticker_obj.ticker # Get ticker symbol for logging
 
@@ -80,15 +85,10 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
         raise
 
     logger.info(f"Fetching data for {ticker_obj.ticker} on {date}...")
-    try:
-        # yfinance calls are synchronous
-        option_chain_data = ticker_obj.option_chain(date)
-        logger.info(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
-        return date, option_chain_data # Return date along with data to identify result
-    except Exception as e:
-        logger.error(f"Error fetching data for {ticker_obj.ticker} on {date}: {e}")
-        # Log and re-raise the error during fetch
-        raise
+    # The backoff decorator handles retries if an exception occurs here
+    option_chain_data = ticker_obj.option_chain(date)
+    logger.info(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
+    return date, option_chain_data # Return date along with data to identify result
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -170,6 +170,7 @@ def collect_option_chain(ticker_symbol: str):
     # This is appropriate for a global API rate limit like yfinance.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
+        # The fetch_option_chain_for_date function now has backoff built-in
         future_to_date = {executor.submit(fetch_option_chain_for_date, ticker_obj, date): date for date in expiration_dates}
 
         # Process results as they complete
@@ -177,10 +178,12 @@ def collect_option_chain(ticker_symbol: str):
             date = future_to_date[future]
             try:
                 # Get the result from the future (this will re-raise exceptions
-                # that occurred in the thread, including those we explicitly re-raise)
+                # that occurred in the thread, including those handled/retried by backoff
+                # if max_time is reached or backoff is exhausted)
                 fetched_date, option_chain_data = future.result()
 
                 if option_chain_data is None:
+                    # This case should be less likely now with backoff, but kept for safety.
                     # If fetch_option_chain_for_date returned None (e.g., due to an error
                     # that wasn't re-raised, though we've changed that now), skip.
                     # With the changes above, future.result() will likely raise instead.
@@ -195,7 +198,8 @@ def collect_option_chain(ticker_symbol: str):
                 all_options_to_save.extend(puts_options)
 
             except Exception as e:
-                # Catch exceptions re-raised from fetch_option_chain_for_date or transform_option_data
+                # Catch exceptions re-raised from fetch_option_chain_for_date (after backoff attempts)
+                # or from transform_option_data
                 logger.error(f"Error processing result for {ticker_symbol} on {date}: {e}")
                 # Log and re-raise the error. This will stop the as_completed loop
                 # and the exception will propagate out of the 'with executor:' block.
