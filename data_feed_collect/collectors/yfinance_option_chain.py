@@ -123,7 +123,7 @@ def _fetch_current_stock_price(ticker_obj: yf.Ticker) -> Optional[float]:
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str, underlying_price: Optional[float]) -> List[YFinanceOption]:
     """
     Transforms a pandas DataFrame of option data (calls or puts) into a list
-    of YFinanceOption model instances, including the underlying price.
+    of YFinanceOption model instances, including the underlying price and calculated mid-price.
     """
     options = []
     if df is not None and not df.empty:
@@ -131,6 +131,19 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
         collected_at = datetime.utcnow()
         for _, row in df.iterrows():
             try:
+                # Calculate mid_price: (bid + ask) / 2
+                # Handle cases where bid or ask might be None/NaN
+                bid = row.get('bid')
+                ask = row.get('ask')
+                mid_price = None
+                if pd.notna(bid) and pd.notna(ask):
+                    try:
+                        mid_price = (float(bid) + float(ask)) / 2.0
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not calculate mid_price for {ticker_symbol} {expiration_date} {option_type} due to invalid bid/ask values: bid={bid}, ask={ask}")
+                        mid_price = None # Ensure mid_price is None if calculation fails
+
+
                 # Map DataFrame columns to YFinanceOption model attributes
                 # Use .get() to safely access columns that might be missing
                 # Convert pandas types (like numpy.int64, numpy.float64) to Python types
@@ -155,7 +168,8 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
                     change=float(row.get('change')) if pd.notna(row.get('change')) else None,
                     percentChange=float(row.get('percentChange')) if pd.notna(row.get('percentChange')) else None, # Corrected attribute name
                     data_collected_timestamp=collected_at, # Corrected attribute name
-                    underlying_price=underlying_price # Add the underlying price
+                    underlying_price=underlying_price, # Add the underlying price
+                    mid_price=mid_price # Add the calculated mid price
                 )
                 options.append(option)
             except Exception as e:

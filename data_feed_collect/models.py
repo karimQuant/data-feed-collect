@@ -37,6 +37,9 @@ class YFinanceOption(Base):
     # New column for underlying price
     underlying_price = Column(Float, comment='The price of the underlying stock at the time the option data was collected')
 
+    # New column for calculated mid price
+    mid_price = Column(Float, comment='The calculated mid price of the option contract ((bid + ask) / 2)')
+
     __table_args__ = (
         {'comment': 'Stores detailed option chain data fetched from Yahoo Finance for various tickers and expiration dates.'},
     )
@@ -45,7 +48,7 @@ class YFinanceOption(Base):
     def __repr__(self):
         return (f"<YFinanceOption(contractSymbol='{self.contractSymbol}', ticker='{self.ticker}', "
                 f"data_collected_timestamp='{self.data_collected_timestamp.isoformat()}', "
-                f"strike={self.strike}, optionType='{self.optionType}', underlying_price={self.underlying_price})>")
+                f"strike={self.strike}, optionType='{self.optionType}', underlying_price={self.underlying_price}, mid_price={self.mid_price})>")
 
 class StocksCollection(Base):
     """
