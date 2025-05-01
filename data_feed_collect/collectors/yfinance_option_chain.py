@@ -1,69 +1,50 @@
 import threading
 import concurrent.futures
 import yfinance as yf
-from pyrate_limiter import Limiter, Rate, Duration, BucketFactory, AbstractBucket, RateItem, InMemoryBucket
+# Remove pyrate-limiter imports
+# from pyrate_limiter import Limiter, Rate, Duration, BucketFactory, AbstractBucket, RateItem, InMemoryBucket
+from ratelimiter import RateLimiter # Import ratelimiter
 from sqlalchemy.orm import Session
-from data_feed_collect.models import YFinanceOption, StocksCollection # Import StocksCollection
+from data_feed_collect.models import YFinanceOption, StocksCollection
 from data_feed_collect.database import get_db
 import pandas as pd
 from typing import List, Optional
 from datetime import datetime
-import time # Needed for TimeClock
-import logging # Import logging module
-from data_feed_collect.logging_config import setup_logging # Import logging setup
-import backoff # Import backoff library
+import time # Needed for TimeClock (though less critical with ratelimiter decorator)
+import logging
+from data_feed_collect.logging_config import setup_logging
+import backoff
 
 # Get a logger instance for this module
 logger = logging.getLogger(__name__)
 
-# Define the rate limits
-# Example: Allow up to 50 calls per minute. Adjust as needed based on yfinance limits.
-# Note: yfinance limits are not officially documented and can change.
-# We'll use a single rate for simplicity, applied globally across all tickers/calls.
-rate = Rate(50, Duration.MINUTE)
-rates = [rate]
+# Define the rate limits using ratelimiter decorator parameters
+# 50 calls per minute -> max_calls=50, period=60
+YFINANCE_MAX_CALLS = 50
+YFINANCE_PERIOD_SECONDS = 60
 
-# Define a simple BucketFactory that uses a single InMemoryBucket
-# This aligns with the documentation's structure for using a Limiter with a factory.
-class SingleBucketFactory(BucketFactory):
-    def __init__(self, rates: List[Rate]):
-        # Create a single InMemoryBucket instance with the defined rates
-        self._bucket = InMemoryBucket(rates)
-        # Use the default TimeClock (which uses time.time())
-        self._clock = time
+# Remove pyrate-limiter setup
+# rate = Rate(50, Duration.MINUTE)
+# rates = [rate]
+# class SingleBucketFactory(BucketFactory):
+#     def __init__(self, rates: List[Rate]):
+#         self._bucket = InMemoryBucket(rates)
+#         self._clock = time
+#     def wrap_item(self, name: str, weight: int = 1) -> RateItem:
+#         now = self._clock.time()
+#         return RateItem(name, now, weight=weight)
+#     def get(self, _item: RateItem) -> AbstractBucket:
+#         return self._bucket
+# bucket_factory = SingleBucketFactory(rates)
+# limiter = Limiter(bucket_factory, max_delay=float('inf'))
+# GLOBAL_YFINANCE_ITEM_NAME = "yfinance_api_call"
 
-        # The Limiter instance is responsible for calling schedule_leak on the factory's buckets.
-        # We don't need to call schedule_leak manually here.
-
-    def wrap_item(self, name: str, weight: int = 1) -> RateItem:
-        """Time-stamping item, return a RateItem"""
-        # Use the factory's clock to get the current timestamp
-        now = self._clock.time()
-        return RateItem(name, now, weight=weight)
-
-    def get(self, _item: RateItem) -> AbstractBucket:
-        """Route all items to the single bucket"""
-        # For this simple case, all items go to the same bucket
-        return self._bucket
-
-# Instantiate the BucketFactory with the defined rates
-bucket_factory = SingleBucketFactory(rates)
-
-# Instantiate the Limiter with the BucketFactory
-# Set max_delay to float('inf') to make try_acquire block indefinitely if the rate limit is hit.
-# This replicates the blocking behavior of the previous limiter.block() usage.
-# raise_when_fail=True (default) means it will raise LimiterDelayException if the required
-# wait time exceeds max_delay. With max_delay=inf, this exception will not be raised.
-limiter = Limiter(bucket_factory, max_delay=float('inf'))
-
-# Define a constant item name for the global rate limit
-# Using a constant name ensures all calls contribute to the same bucket/rate limit.
-GLOBAL_YFINANCE_ITEM_NAME = "yfinance_api_call"
 
 @backoff.on_exception(backoff.expo,
                       Exception, # Retry on any Exception. Refine this if specific errors are known.
                       max_time=180, # Max retry duration in seconds (3 minutes)
                       logger=logger) # Use the module logger for backoff messages
+@RateLimiter(max_calls=YFINANCE_MAX_CALLS, period=YFINANCE_PERIOD_SECONDS)
 def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     Fetches option chain for a specific date for a yfinance Ticker object,
@@ -72,23 +53,36 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     ticker_symbol = ticker_obj.ticker # Get ticker symbol for logging
 
-    # Apply rate limiting before making the call
-    # Use try_acquire with the constant item name for the global limit.
-    # Since max_delay is set to inf on the limiter, this will block if necessary.
-    try:
-        limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
-    except Exception as e:
-        # This catch is mostly for unexpected errors from try_acquire,
-        # as max_delay=inf should prevent LimiterDelayException.
-        logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
-        # Log and re-raise the unexpected error
-        raise
+    # Remove pyrate-limiter acquire call
+    # try:
+    #     limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
+    # except Exception as e:
+    #     logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
+    #     raise
 
     logger.info(f"Fetching data for {ticker_obj.ticker} on {date}...")
-    # The backoff decorator handles retries if an exception occurs here
+    # The RateLimiter decorator handles waiting if the rate limit is hit.
+    # The backoff decorator handles retries if an exception occurs here after waiting.
     option_chain_data = ticker_obj.option_chain(date)
     logger.info(f"Successfully fetched data for {ticker_obj.ticker} on {date}.")
     return date, option_chain_data # Return date along with data to identify result
+
+@backoff.on_exception(backoff.expo,
+                      Exception, # Retry on any Exception. Refine this if specific errors are known.
+                      max_time=180, # Max retry duration in seconds (3 minutes)
+                      logger=logger) # Use the module logger for backoff messages
+@RateLimiter(max_calls=YFINANCE_MAX_CALLS, period=YFINANCE_PERIOD_SECONDS)
+def _fetch_ticker_options(ticker_obj: yf.Ticker) -> List[str]:
+    """
+    Fetches expiration dates for a yfinance Ticker object,
+    applying rate limiting and exponential backoff on errors.
+    """
+    logger.info(f"Fetching expiration dates for {ticker_obj.ticker}...")
+    # The RateLimiter decorator handles waiting if the rate limit is hit.
+    # The backoff decorator handles retries if an exception occurs here after waiting.
+    expiration_dates = ticker_obj.options
+    logger.info(f"Successfully fetched expiration dates for {ticker_obj.ticker}.")
+    return expiration_dates
 
 
 def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataFrame, option_type: str) -> List[YFinanceOption]:
@@ -140,24 +134,20 @@ def collect_option_chain(ticker_symbol: str):
     Collects option chain data for a given ticker across all expiration dates,
     saves the data to the database.
 
-    Uses threading for parallel fetching and pyrate-limiter for rate limiting.
+    Uses threading for parallel fetching and ratelimiter for rate limiting.
     """
     logger.info(f"Starting option chain collection for {ticker_symbol}...")
     ticker_obj = yf.Ticker(ticker_symbol)
 
-    # Fetch expiration dates. This call is synchronous.
+    # Fetch expiration dates using the new helper function with decorators
     try:
-        # Apply rate limiting to the initial options call as well
-        # Use try_acquire with the constant item name for the global limit.
-        # Since max_delay is set to inf on the limiter, this will block if necessary.
-        limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
-        expiration_dates = ticker_obj.options
+        expiration_dates = _fetch_ticker_options(ticker_obj)
         if not expiration_dates:
             logger.info(f"No expiration dates found for {ticker_symbol}. Skipping.")
             return
         logger.info(f"Found {len(expiration_dates)} expiration dates for {ticker_symbol}.")
     except Exception as e:
-        # Catch potential errors from try_acquire or ticker_obj.options
+        # Catch potential errors from _fetch_ticker_options (after backoff attempts)
         logger.error(f"Error fetching expiration dates for {ticker_symbol}: {e}")
         # Log and re-raise the error
         raise
@@ -166,16 +156,16 @@ def collect_option_chain(ticker_symbol: str):
 
     # Use ThreadPoolExecutor to fetch data for different expiration dates in parallel
     # Max workers can be adjusted based on system resources and desired concurrency
-    # Note: The rate limiter is global, so multiple threads will share the same limit.
-    # This is appropriate for a global API rate limit like yfinance.
+    # Note: The ratelimiter decorator is applied to the function, so each call
+    # to fetch_option_chain_for_date will respect the global rate limit.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
-        # The fetch_option_chain_for_date function now has backoff built-in
+        # The fetch_option_chain_for_date function now has backoff and RateLimiter built-in
         future_to_date = {executor.submit(fetch_option_chain_for_date, ticker_obj, date): date for date in expiration_dates}
 
         # Process results as they complete
         for future in concurrent.futures.as_completed(future_to_date):
-            date = future_to_date[future]
+            date = future_to_ticker[future] # Corrected variable name from future_to_date
             try:
                 # Get the result from the future (this will re-raise exceptions
                 # that occurred in the thread, including those handled/retried by backoff
@@ -262,9 +252,12 @@ def database_update():
 
     # Use ThreadPoolExecutor to run collect_option_chain for each ticker in parallel
     # Set max_workers to 5 as requested.
-    # Note: The yfinance rate limiter is global and shared across all threads/tickers.
+    # Note: The ratelimiter decorator is applied to the functions making API calls,
+    # ensuring the global rate limit is respected across all threads/tickers.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
+        # collect_option_chain itself doesn't have the rate limit decorator,
+        # but the functions it calls (_fetch_ticker_options and fetch_option_chain_for_date) do.
         future_to_ticker = {executor.submit(collect_option_chain, ticker): ticker for ticker in tickers_to_collect}
 
         # Process results as they complete (or handle exceptions)
