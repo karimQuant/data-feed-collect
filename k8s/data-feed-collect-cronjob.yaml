@@ -13,7 +13,7 @@ spec:
           containers:
           - name: collector
             image: ghcr.io/karimquant/data-feed-collect:latest
-            imagePullPolicy: IfNotPresent # Or Always, depending on your update strategy
+            imagePullPolicy: Always
 
             env:
             - name: POSTGRES_USER
@@ -34,18 +34,17 @@ spec:
               value: "5432"
 
             # Add resource requests/limits here if needed
-            # resources:
-            #   requests:
-            #     memory: "64Mi"
-            #     cpu: "250m"
-            #   limits:
-            #     memory: "128Mi"
-            #     cpu: "500m"
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "250m"
+              limits:
+                memory: "10Gi"
+                cpu: "4"
             # Add command/args if your container needs specific entrypoint overrides
             # command: ["python", "data_feed_collect/main.py"] # Example
-            # args: ["--some-arg", "some-value"] # Example
+            command: ["/bin/sh", "-c"]
+            # args: ["python3 data_feed_collect/collectors/yfinance_option_chain.py"]
+            args: ["tail", "-f", "/dev/null"] # Keep the container running for debugging purposes
           restartPolicy: OnFailure # Restart the container if it fails
-  # Optional: Configure concurrency policy, suspend, successfulJobsHistoryLimit, failedJobsHistoryLimit
-  # concurrencyPolicy: Allow # Allow multiple job instances to run concurrently (default)
-  # successfulJobsHistoryLimit: 3 # Keep the last 3 successful jobs
-  # failedJobsHistoryLimit: 1 # Keep the last 1 failed job
+  

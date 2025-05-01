@@ -23,10 +23,3 @@ COPY data_feed_collect/ ./data_feed_collect/
 # --system flag installs into the system site-packages, suitable for Docker
 RUN uv pip install --system .
 
-# Command to run the script
-# This assumes the script is the main entrypoint for the container
-# The script itself handles logging setup and database connection via environment variables
-CMD ["python", "data_feed_collect/collectors/yfinance_option_chain.py"]
-
-# Note: This container expects the DATABASE_URL environment variable to be set
-# when it is run.
