@@ -3,10 +3,31 @@ kind: Pod
 metadata:
   name: test-pod-for-debugging
 spec:
+  imagePullSecrets:
+    - name: ghcr-secret
   containers:
   - name: debug-container
-    # Replace with the actual image name and tag you want to test
-    image: your-image-name:latest
+    image: ghcr.io/karimquant/data-feed-collect:latest
+    imagePullPolicy: Always # Ensure the latest image is pulled
+
+    env:
+    - name: POSTGRES_USER
+      valueFrom:
+        secretKeyRef:
+          name: postgres-secret
+          key: postgres-user
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: postgres-secret
+          key: postgres-password
+    - name: POSTGRES_DB
+      value: "postgres"
+    - name: POSTGRES_HOST
+      value: "postgres-service"
+    - name: POSTGRES_PORT
+      value: "5432"
+
     # Keep the container running indefinitely for debugging
     command: ["tail"]
     args: ["-f", "/dev/null"]
