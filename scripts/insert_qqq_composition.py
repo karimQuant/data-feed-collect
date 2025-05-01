@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import sys
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm.exc import FlushError # Import FlushError
 
 # Assuming data_feed_collect is in the Python path or accessible
 # Add the parent directory of data_feed_collect to the path if necessary
@@ -17,19 +18,15 @@ CSV_FILE_PATH = 'data/qqq_composition.csv'
 def insert_qqq_composition():
     """
     Reads the QQQ composition CSV and inserts/updates stock information
-    into the StocksCollection table.
+    into the StocksCollection table using db.merge().
     """
     if not os.path.exists(CSV_FILE_PATH):
         print(f"Error: CSV file not found at {CSV_FILE_PATH}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        # Read the CSV file
-        # Assuming the CSV has columns like 'Ticker' and 'Description'
-        # Adjust column names if your CSV uses different headers
         df = pd.read_csv(CSV_FILE_PATH)
 
-        # Ensure required columns exist
         required_columns = ['Ticker', 'Description'] # Adjust based on your CSV headers
         if not all(col in df.columns for col in required_columns):
             print(f"Error: CSV must contain columns: {required_columns}", file=sys.stderr)
@@ -38,54 +35,47 @@ def insert_qqq_composition():
         print(f"Reading data from {CSV_FILE_PATH}...")
         print(f"Found {len(df)} rows.")
 
-        # Get a database session
-        db = next(get_db()) # Use next() to get the session generator's value
+        db = next(get_db())
 
-        inserted_count = 0
-        updated_count = 0
-        skipped_count = 0
+        processed_count = 0
 
         try:
             for index, row in df.iterrows():
                 ticker = row['Ticker']
-                description = row['Description'] # Adjust column name
+                description = row['Description']
 
-                # Check if the stock already exists
-                existing_stock = db.query(StocksCollection).filter(StocksCollection.ticker == ticker).first()
+                # Create a StocksCollection instance with the data
+                # We don't set the 'id' as it's auto-generated.
+                # merge() will use the 'ticker' unique constraint to find existing rows.
+                stock_data = StocksCollection(
+                    ticker=ticker,
+                    company_description=description
+                )
 
-                if existing_stock:
-                    # Optionally update existing record if description changes
-                    if existing_stock.company_description != description: # Corrected column name to company_description
-                        existing_stock.company_description = description # Corrected column name to company_description
-                        updated_count += 1
-                        # print(f"Updating {ticker}") # Uncomment for verbose output
-                    else:
-                        skipped_count += 1
-                        # print(f"Skipping {ticker} (already exists and matches)") # Uncomment for verbose output
-                else:
-                    # Create a new StocksCollection instance
-                    new_stock = StocksCollection(
-                        ticker=ticker,
-                        company_description=description # Corrected column name to company_description
-                        # Add other fields if necessary based on your model
-                    )
-                    db.add(new_stock)
-                    inserted_count += 1
-                    # print(f"Inserting {ticker}") # Uncomment for verbose output
+                # Use merge() which handles both insert and update based on unique constraints.
+                # It returns the object as it exists in the session after the merge.
+                # If an object with the same ticker exists, it's loaded and updated.
+                # If not, a new object is prepared for insertion.
+                db.merge(stock_data)
+                processed_count += 1
+                # print(f"Processed ticker: {ticker}") # Uncomment for verbose output
 
             # Commit the transaction
+            # This is where the batched inserts/updates are executed.
             db.commit()
             print("\nDatabase transaction committed successfully.")
-            print(f"Summary: Inserted {inserted_count}, Updated {updated_count}, Skipped {skipped_count}")
+            print(f"Summary: Processed {processed_count} rows (inserted or updated).")
 
         except SQLAlchemyError as e:
             db.rollback() # Roll back the transaction on error
             print(f"Database error occurred: {e}", file=sys.stderr)
-            sys.exit(1)
+            # Re-raise the exception to ensure the script exits with an error code
+            raise
         except Exception as e:
             db.rollback() # Roll back on other errors too
             print(f"An unexpected error occurred: {e}", file=sys.stderr)
-            sys.exit(1)
+            # Re-raise the exception
+            raise
         finally:
             db.close() # Close the session
 
@@ -104,4 +94,13 @@ def insert_qqq_composition():
 
 
 if __name__ == "__main__":
-    insert_qqq_composition()
+    # Check for necessary environment variables
+    if not os.getenv("DATABASE_URL") and not (os.getenv("POSTGRES_HOST") and os.getenv("POSTGRES_PORT") and os.getenv("POSTGRES_DATABASE")):
+         print("Error: DATABASE_URL or sufficient POSTGRES_ environment variables are not set.", file=sys.stderr)
+         sys.exit(1)
+
+    try:
+        insert_qqq_composition()
+    except Exception:
+        # Catch exceptions re-raised from insert_qqq_composition to ensure non-zero exit code
+        sys.exit(1)
