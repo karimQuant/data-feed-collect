@@ -1,8 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime, Text # Import Text for potentially long descriptions
+from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, DateTime, Text
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
-from data_feed_collect.database import get_engine # Import get_engine
-# No need to import Table from sqlalchemy.schema for this approach
+from data_feed_collect.database import get_engine
 
 # Define the base for declarative models
 Base = declarative_base()
@@ -13,30 +12,30 @@ class YFinanceOption(Base):
     """
     __tablename__ = 'yfinance_options'
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    contractSymbol = Column(String, index=True)
-    ticker = Column(String, index=True)
-    data_collected_timestamp = Column(DateTime, index=True) # Timestamp when data was collected
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='Unique identifier for the option record')
+    contractSymbol = Column(String, index=True, comment='The unique symbol identifying the option contract (e.g., AAPL230915C00150000)')
+    ticker = Column(String, index=True, comment='The ticker symbol of the underlying asset (e.g., AAPL)')
+    data_collected_timestamp = Column(DateTime, index=True, comment='Timestamp when this specific option data record was collected')
 
     # Option specific data fields from Yahoo Finance
-    strike = Column(Float, nullable=False)
-    currency = Column(String, nullable=False)
-    lastPrice = Column(Float) # Can be None if no trades
-    change = Column(Float)
-    percentChange = Column(Float)
-    volume = Column(Integer) # Can be None
-    openInterest = Column(Integer) # Can be None
-    bid = Column(Float) # Can be None
-    ask = Column(Float) # Can be None
-    contractSize = Column(String, nullable=False) # e.g., 'REGULAR'
-    expiration = Column(DateTime, nullable=False) # Stored as DateTime type
-    lastTradeDate = Column(DateTime) # Unix timestamp of last trade date, can be None
-    impliedVolatility = Column(Float) # Can be None
-    inTheMoney = Column(Boolean, nullable=False)
-    optionType = Column(String, nullable=False) # 'call' or 'put'
+    strike = Column(Float, nullable=False, comment='The strike price of the option contract')
+    currency = Column(String, nullable=False, comment='The currency of the option contract (e.g., USD)')
+    lastPrice = Column(Float, comment='The last traded price of the option contract') # Can be None if no trades
+    change = Column(Float, comment='The change in price from the previous trading day close')
+    percentChange = Column(Float, comment='The percentage change in price from the previous trading day close')
+    volume = Column(Integer, comment='The trading volume for the day') # Can be None
+    openInterest = Column(Integer, comment='The total number of outstanding option contracts') # Can be None
+    bid = Column(Float, comment='The current highest price a buyer is willing to pay') # Can be None
+    ask = Column(Float, comment='The current lowest price a seller is willing to accept') # Can be None
+    contractSize = Column(String, nullable=False, comment='The size of the contract (e.g., REGULAR)') # e.g., 'REGULAR'
+    expiration = Column(DateTime, nullable=False, comment='The expiration date of the option contract') # Stored as DateTime type
+    lastTradeDate = Column(DateTime, comment='The date and time of the last trade for this contract') # Unix timestamp of last trade date, can be None
+    impliedVolatility = Column(Float, comment='The implied volatility of the option contract') # Can be None
+    inTheMoney = Column(Boolean, nullable=False, comment='Indicates if the option is currently in the money (True) or out of the money (False)')
+    optionType = Column(String, nullable=False, comment='The type of option contract (e.g., call or put)') # 'call' or 'put'
 
     __table_args__ = (
-        {'comment': 'Yahoo Finance Option Chain Data'},
+        {'comment': 'Stores detailed option chain data fetched from Yahoo Finance for various tickers and expiration dates.'},
     )
 
 
@@ -51,12 +50,12 @@ class StocksCollection(Base):
     """
     __tablename__ = 'stocks_collection'
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    ticker = Column(String, unique=True, index=True, nullable=False) # Ticker symbol, should be unique
-    company_description = Column(Text) # Use Text for potentially long descriptions
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='Unique identifier for the stock record')
+    ticker = Column(String, unique=True, index=True, nullable=False, comment='The unique ticker symbol for the stock (e.g., AAPL, MSFT)') # Ticker symbol, should be unique
+    company_description = Column(Text, comment='A brief description or profile of the company associated with the ticker') # Use Text for potentially long descriptions
 
     __table_args__ = (
-        {'comment': 'Basic Stock Information'},
+        {'comment': 'Stores basic information about collected stocks, primarily ticker symbols and company descriptions.'},
     )
 
     def __repr__(self):
@@ -75,6 +74,7 @@ def init_schema(engine):
     """
     print("Initializing database schema...")
     # Base.metadata.create_all will now create tables for all models inheriting from Base
+    # and include comments defined in the models.
     Base.metadata.create_all(engine)
     print("Database schema initialization complete.")
 
