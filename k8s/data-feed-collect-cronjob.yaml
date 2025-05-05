@@ -3,7 +3,8 @@ kind: CronJob
 metadata:
   name: data-feed-collect-cronjob
 spec:
-  schedule: "0,30 14-21 * * *" # Runs at :00 and :30 past the hour, for hours 14 through 21 UTC. Approximates 9:30 AM - 5:00 PM ET considering DST.
+  schedule: "0,30 9-16 * * *"
+  timeZone: "America/New_York"
   jobTemplate:
     spec:
       template:
