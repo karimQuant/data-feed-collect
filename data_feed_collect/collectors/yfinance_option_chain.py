@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Define the rate limits using limiter parameters
 # 50 calls per minute -> rate = 50/60 calls per second
-YFINANCE_RATE_PER_SECOND = 50 / 60
+YFINANCE_RATE_PER_SECOND = 100 / 60
 YFINANCE_CAPACITY = 5 # Example burst capacity
 
 # Create a global Limiter instance
@@ -197,7 +197,7 @@ def collect_option_chain(ticker_symbol: str):
     logger.info(f"Starting option chain collection for {ticker_symbol}...")
 
     session = requests.Session(impersonate="chrome",proxy=AVAILABLE_PROXIES[0])
-    ticker_obj = yf.Ticker(ticker_symbol,session)
+    ticker_obj = yf.Ticker(ticker_symbol,session=session)
 
     # Fetch the current underlying stock price first
     try:
@@ -366,5 +366,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # main() # Call the synchronous main function
-    collect_option_chain("AAPL") # Test with a single ticker
+    main() # Call the synchronous main function
