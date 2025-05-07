@@ -9,12 +9,14 @@ from sqlalchemy.orm import Session
 from data_feed_collect.models import YFinanceOption, StocksCollection
 from data_feed_collect.database import get_db
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import time # Needed for TimeClock (though less critical with ratelimiter decorator)
 import logging
 from data_feed_collect.logging_config import setup_logging
 import backoff
+import os # Import os to read environment variables
+import itertools # Import itertools for cycling proxies
 
 # Get a logger instance for this module
 logger = logging.getLogger(__name__)
@@ -24,24 +26,48 @@ logger = logging.getLogger(__name__)
 YFINANCE_RATE_PER_SECOND = 50 / 60
 YFINANCE_CAPACITY = 5 # Example burst capacity
 
-# Remove pyrate-limiter setup
-# rate = Rate(50, Duration.MINUTE)
-# rates = [rate]
-# class SingleBucketFactory(BucketFactory):
-#     def __init__(self, rates: List[Rate]):
-#         self._bucket = InMemoryBucket(rates)
-#         self._clock = time
-#     def wrap_item(self, name: str, weight: int = 1) -> RateItem:
-#         now = self._clock.time()
-#         return RateItem(name, now, weight=1)
-#     def get(self, _item: RateItem) -> AbstractBucket:
-#         return self._bucket
-# bucket_factory = SingleBucketFactory(rates)
-# limiter = Limiter(bucket_factory, max_delay=float('inf'))
-# GLOBAL_YFINANCE_ITEM_NAME = "yfinance_api_call"
-
 # Create a global Limiter instance
 yfinance_limiter = Limiter(rate=YFINANCE_RATE_PER_SECOND, capacity=YFINANCE_CAPACITY)
+
+# --- Proxy Management ---
+
+# Read proxies from environment variable DECODO_PROXIES
+# Expected format: "http://user:pass@host:port,http://user2:pass2@host2:port2"
+def get_proxies_from_env() -> List[str]:
+    """Reads a comma-separated list of proxies from the DECODO_PROXIES environment variable."""
+    proxies_str = os.getenv("DECODO_PROXIES")
+    if not proxies_str:
+        logger.info("DECODO_PROXIES environment variable not set. No proxies will be used.")
+        return []
+    proxies = [p.strip() for p in proxies_str.split(',') if p.strip()]
+    logger.info(f"Loaded {len(proxies)} proxies from DECODO_PROXIES.")
+    return proxies
+
+# Global list of proxies and an iterator for cycling
+AVAILABLE_PROXIES = get_proxies_from_env()
+# Use itertools.cycle for simple round-robin proxy selection
+# If AVAILABLE_PROXIES is empty, next(PROXY_CYCLE) will raise StopIteration,
+# which is handled by checking if proxies are available.
+PROXY_CYCLE = itertools.cycle(AVAILABLE_PROXIES) if AVAILABLE_PROXIES else None
+PROXY_LOCK = threading.Lock() # Lock for thread-safe access to the proxy cycle
+
+def get_next_proxy() -> Optional[Dict[str, str]]:
+    """Gets the next proxy from the cycle in a thread-safe manner."""
+    if not AVAILABLE_PROXIES:
+        return None
+    with PROXY_LOCK:
+        try:
+            # Get the next proxy string (e.g., "http://host:port")
+            proxy_str = next(PROXY_CYCLE)
+            # yfinance expects a dictionary like {'http': proxy_str, 'https': proxy_str}
+            return {'http': proxy_str, 'https': proxy_str}
+        except StopIteration:
+            # This should not happen with itertools.cycle on a non-empty list,
+            # but as a safeguard.
+            logger.error("Proxy cycle exhausted unexpectedly.")
+            return None
+
+# --- End Proxy Management ---
 
 
 @backoff.on_exception(backoff.expo,
@@ -58,16 +84,10 @@ def fetch_option_chain_for_date(ticker_obj: yf.Ticker, date: str):
     """
     ticker_symbol = ticker_obj.ticker # Get ticker symbol for logging
 
-    # Remove pyrate-limiter acquire call
-    # try:
-    #     limiter.try_acquire(GLOBAL_YFINANCE_ITEM_NAME)
-    # except Exception as e:
-    #     logger.error(f"Error acquiring rate limit for {ticker_symbol} on {date}: {e}")
-    #     raise
-
     logger.info(f"Fetching option chain data for {ticker_obj.ticker} on {date}...")
     # The limiter decorator handles waiting if the rate limit is hit.
     # The backoff decorator handles retries if an exception occurs here after waiting.
+    # The proxy is already configured on the ticker_obj instance.
     option_chain_data = ticker_obj.option_chain(date)
     logger.info(f"Successfully fetched option chain data for {ticker_obj.ticker} on {date}.")
     return date, option_chain_data # Return date along with data to identify result
@@ -86,6 +106,7 @@ def _fetch_ticker_options(ticker_obj: yf.Ticker) -> List[str]:
     logger.info(f"Fetching expiration dates for {ticker_obj.ticker}...")
     # The limiter decorator handles waiting if the rate limit is hit.
     # The backoff decorator handles retries if an exception occurs here after waiting.
+    # The proxy is already configured on the ticker_obj instance.
     expiration_dates = ticker_obj.options
     logger.info(f"Successfully fetched expiration dates for {ticker_obj.ticker}.")
     return expiration_dates
@@ -105,6 +126,7 @@ def _fetch_current_stock_price(ticker_obj: yf.Ticker) -> Optional[float]:
     logger.info(f"Fetching current price for {ticker_symbol}...")
     try:
         # Fetching info is a common way to get current price
+        # The proxy is already configured on the ticker_obj instance.
         info = ticker_obj.info
         # yfinance info dictionary keys can vary, 'currentPrice' is common
         current_price = info.get('currentPrice')
@@ -186,9 +208,19 @@ def collect_option_chain(ticker_symbol: str):
 
     Uses threading for parallel fetching and limiter for rate limiting.
     Fetches underlying price once per ticker.
+    Uses a proxy if available.
     """
     logger.info(f"Starting option chain collection for {ticker_symbol}...")
-    ticker_obj = yf.Ticker(ticker_symbol)
+
+    # Get a proxy for this ticker instance
+    proxy_config = get_next_proxy()
+    if proxy_config:
+        logger.info(f"Using proxy {proxy_config.get('http')} for {ticker_symbol}")
+        ticker_obj = yf.Ticker(ticker_symbol, proxies=proxy_config)
+    else:
+        logger.info(f"No proxy available for {ticker_symbol}. Using direct connection.")
+        ticker_obj = yf.Ticker(ticker_symbol)
+
 
     # Fetch the current underlying stock price first
     try:
@@ -225,6 +257,7 @@ def collect_option_chain(ticker_symbol: str):
     # Max workers can be adjusted based on system resources and desired concurrency
     # Note: The limiter decorator is applied to the function, so each call
     # to fetch_option_chain_for_date will respect the global rate limit.
+    # The ticker_obj instance (with its configured proxy) is passed to the threads.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
         # The fetch_option_chain_for_date function now has backoff and Limiter built-in
@@ -322,6 +355,7 @@ def database_update():
     # Set max_workers to 5 as requested.
     # Note: The limiter decorator is applied to the functions making API calls,
     # ensuring the global rate limit is respected across all threads/tickers.
+    # Each call to collect_option_chain will get its own proxy from the cycle.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         # Submit tasks to the executor
         # collect_option_chain itself doesn't have the rate limit decorator,
