@@ -1,6 +1,8 @@
 import threading
 import concurrent.futures
 import yfinance as yf
+import requests
+from curl_cffi import requests
 # Remove pyrate-limiter imports
 # from pyrate_limiter import Limiter, Rate, Duration, BucketFactory, AbstractBucket, RateItem, InMemoryBucket
 # from ratelimiter import RateLimiter # Import ratelimiter - REMOVED
@@ -45,29 +47,10 @@ def get_proxies_from_env() -> List[str]:
 
 # Global list of proxies and an iterator for cycling
 AVAILABLE_PROXIES = get_proxies_from_env()
-# Use itertools.cycle for simple round-robin proxy selection
-# If AVAILABLE_PROXIES is empty, next(PROXY_CYCLE) will raise StopIteration,
-# which is handled by checking if proxies are available.
-PROXY_CYCLE = itertools.cycle(AVAILABLE_PROXIES) if AVAILABLE_PROXIES else None
-PROXY_LOCK = threading.Lock() # Lock for thread-safe access to the proxy cycle
+yf.set_config(proxy=f'{AVAILABLE_PROXIES[0]}')
 
-def get_next_proxy() -> Optional[Dict[str, str]]:
-    """Gets the next proxy from the cycle in a thread-safe manner."""
-    if not AVAILABLE_PROXIES:
-        return None
-    with PROXY_LOCK:
-        try:
-            # Get the next proxy string (e.g., "http://host:port")
-            proxy_str = next(PROXY_CYCLE)
-            # yfinance expects a dictionary like {'http': proxy_str, 'https': proxy_str}
-            return {'http': proxy_str, 'https': proxy_str}
-        except StopIteration:
-            # This should not happen with itertools.cycle on a non-empty list,
-            # but as a safeguard.
-            logger.error("Proxy cycle exhausted unexpectedly.")
-            return None
 
-# --- End Proxy Management ---
+
 
 
 @backoff.on_exception(backoff.expo,
@@ -201,6 +184,7 @@ def transform_option_data(ticker_symbol: str, expiration_date: str, df: pd.DataF
 
     return options
 
+
 def collect_option_chain(ticker_symbol: str):
     """
     Collects option chain data for a given ticker across all expiration dates,
@@ -212,15 +196,8 @@ def collect_option_chain(ticker_symbol: str):
     """
     logger.info(f"Starting option chain collection for {ticker_symbol}...")
 
-    # Get a proxy for this ticker instance
-    proxy_config = get_next_proxy()
-    if proxy_config:
-        logger.info(f"Using proxy {proxy_config.get('http')} for {ticker_symbol}")
-        ticker_obj = yf.Ticker(ticker_symbol, proxies=proxy_config)
-    else:
-        logger.info(f"No proxy available for {ticker_symbol}. Using direct connection.")
-        ticker_obj = yf.Ticker(ticker_symbol)
-
+    session = requests.Session(impersonate="chrome",proxy=AVAILABLE_PROXIES[0])
+    ticker_obj = yf.Ticker(ticker_symbol,session)
 
     # Fetch the current underlying stock price first
     try:
@@ -389,4 +366,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main() # Call the synchronous main function
+    # main() # Call the synchronous main function
+    collect_option_chain("AAPL") # Test with a single ticker
